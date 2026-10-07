@@ -125,6 +125,8 @@ OneBot HTTP 事件上报地址为 http://127.0.0.1:3789/api/onebot/event，需�
 
 自启动前检查 env 的 Colima profile、Docker context、容器名和可执行路径。**已有同名部署时不要同时启动第二套**，默认服务标签和端口相同。详见 [部署说明](docs/DEPLOYMENT.md)。
 
+Apple Silicon Mac 的完整虚拟机方案见 [Colima + Docker + SnowLuma 部署实录](docs/MACOS_VM_DEPLOYMENT.md)：包含实际资源配置、ARM64 镜像构建、仅本机开放的端口、扫码登录、持久数据卷、文件暂存清理和登录后自启排障。WorkBuddy 与网关运行在 Mac 上，只有 QQ 桥运行在虚拟机中。
+
 已有本地部署的源码更新、私人人格覆盖和各功能编辑入口见 [本地可编辑结构](docs/LOCAL_CUSTOMIZATION.md)。界面只维护一份源文件，实际账号与人格不写入公开模板。
 
 ## 不登录也能看演示

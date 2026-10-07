@@ -1,5 +1,7 @@
 # 部署补充说明
 
+Apple Silicon Mac 的具体实施步骤与已核验配置见 [Colima + Docker + SnowLuma 部署实录](MACOS_VM_DEPLOYMENT.md)。本文保留各部署方式共用的边界说明。
+
 ## 本机与容器
 
 网关默认 127.0.0.1:3789，OneBot API 默认 127.0.0.1:3000。容器 localhost 不是 Mac，应配置桥可达的宿主机地址和端口转发，并保持回调令牌或签名验证。
