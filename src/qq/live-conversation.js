@@ -6,6 +6,7 @@ import { AGENT_QQ_ID, OWNER_QQ_ID, sanitizeGroupReply } from "../security/policy
 import { QqMessageReader, MESSAGE_READER_TOOLS } from "./message-reader.js";
 import { readGroupManagement, manageGroup } from "./group-management.js";
 import { conversationActivityWindow } from "../groups/group-state.js";
+import { homeAssistantRequest } from "../automation/home-assistant.js";
 
 const PAGE_SIZE = 40;
 const MAX_WAIT_MS = 8000;
@@ -55,7 +56,7 @@ export async function prepareLiveConversationPrompt(context, prompt) {
 
 /** The scope and callback never leave the Node gateway process. */
 export function createLiveConversationTools({
-  store, targetId, targetType, oneBot, fileManager, stickerManager, qzone,
+  store, targetId, targetType, oneBot, fileManager, stickerManager, qzone, homeAssistant = null,
   trigger, triggerMessages, security, initialImageSequence, renderMessages,
   pokeSenderId = null, allowedPokeUserIds = [], stickers = [], canRun = () => true,
   readOnlyContextMessages = [], messageReader = new QqMessageReader({ oneBot }), onEvent = () => {},
@@ -98,6 +99,8 @@ export function createLiveConversationTools({
     .filter((item) => item.kind === "message" && !item.recalledAt)
     .map((item) => `${Number(item.observedSequence || 0)}:${String(item.summary || "")}`);
   const qzoneFeeds = new Map();
+  const homeReadIds = new Set();
+  const homeAttempts = new Set();
 
   const currentQzoneMessages = () => [...(triggerMessages || []),
     ...currentOwnerQzoneMessages(store, messageReader, targetId)];
@@ -113,6 +116,64 @@ export function createLiveConversationTools({
     if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭，不能再操作 QQ。", true);
     if (context.failed) return answer("本轮发送状态有误，已停止操作；待处理消息仍保留。", true);
     if (context.ended && name !== "end_conversation") return answer("本轮对话已经结束，不能再读取或发送。", true);
+    if (["read_home_devices", "control_home_device", "speak_home_speaker"].includes(name)) {
+      if (!context.readCalled) return answer("请先读取当前会话消息，再使用家居工具。", true);
+      try {
+        if (!homeAssistant) throw new Error("智能家居尚未配置。");
+        const authorization = () => {
+          if (active?.cancelRequested || context.ended || context.failed || !canRun()) throw new Error("本轮已停止，未发送家居指令。");
+          store.assertReplyEnabled(targetId);
+          return homeAssistantRequest({ store, messageReader, targetId, targetType, ownerId: OWNER_QQ_ID,
+            messageId: args.request_message_id, scheduledTask });
+        };
+        const requestMessage = authorization();
+        if (name === "read_home_devices") {
+          const result = await homeAssistant.read(args);
+          authorization();
+          for (const device of result.devices) homeReadIds.add(device.entity_id);
+          return answer(JSON.stringify(result));
+        }
+        if (!homeReadIds.has(args.entity_id)) throw new Error("先用 read_home_devices 查询真实设备、可用服务和参数，不能猜实体 ID。");
+        const actionKey = createHash("sha256").update(JSON.stringify([
+          targetType, targetId, requestMessage.messageId, name, args.entity_id, args.service || "speak",
+          name === "speak_home_speaker" ? (typeof args.text === "string" ? args.text.trim() : args.text) : Object.entries(args.data || {}).sort(([a], [b]) => a.localeCompare(b))
+        ])).digest("hex").slice(0, 24);
+        const prior = (store.snapshot(targetId).liveSession?.actions || []).some((item) =>
+          item.kind === "home_assistant_attempt" && String(item.summary).startsWith(`[${actionKey}] `));
+        if (prior || homeAttempts.has(actionKey)) throw new Error("相同家居请求此前已经尝试；即使曾中断或超时，也不能自动重复执行。请查询状态或等待新的明确请求。");
+        const beforeSend = async () => {
+          authorization();
+          if (homeAttempts.has(actionKey)) throw new Error("相同家居动作已登记，禁止并行重复执行。");
+          homeAttempts.add(actionKey);
+          // Durable attempt BEFORE physical effects: a crash must not repeat a toggle or IR command.
+          await store.claimHomeActionAttempt(targetId, actionKey);
+          await store.recordLiveActionSent(targetId, { kind: "home_assistant_attempt",
+            summary: `[${actionKey}] ${args.entity_id}/${args.service || "speak"} 已登记，执行结果以工具回执为准`,
+            observedSequence: context.lastReadSequence, chatReply: false });
+          authorization();
+        };
+        const result = name === "speak_home_speaker"
+          ? await homeAssistant.speak(args, { requestText: requestMessage.text, beforeSend })
+          : await homeAssistant.control(args, { ownerText: requestMessage.text, beforeSend });
+        context.actionCount += 1;
+        const summary = name === "speak_home_speaker" ? "[小爱音箱：播报指令已接受]"
+          : `[智能家居：${result.entity_id}/${result.service} 指令已接受]`;
+        context.displayedActions.push(summary);
+        try { onEvent({ type: "home-assistant-action", targetType, targetId, entityId: args.entity_id,
+          service: args.service, at: new Date().toISOString() }); active?.onDelta?.("", context.displayedActions.join("\n\n")); }
+        catch { /* an accepted physical command must never be repeated because display failed */ }
+        return answer(JSON.stringify(result));
+      } catch (error) {
+        const code = error.code || "HOME_ASSISTANT_REQUEST_FAILED";
+        const category = code === "HOME_ASSISTANT_PERMISSION_DENIED" ? "permission"
+          : code === "HOME_ASSISTANT_OFFLINE" ? "network"
+          : code === "HOME_ASSISTANT_UNCERTAIN" ? "uncertain" : "request";
+        return answer(JSON.stringify({ error: { code, category, message: error.message },
+          note: category === "network" ? "此次读取未能连通 HA；如实说明连接失败。"
+            : category === "uncertain" ? "物理操作结果未知，不要自动重试。"
+            : "这是授权、请求或参数检查未通过，不能说成 HA 连接失败；按实际原因说明。" }), true);
+      }
+    }
     if (SCHEDULED_QZONE_FEED_TOOLS.has(name)) {
       return answer("旧版动态读取工具已停用。请用 read_qzone_feeds 读取，再按需用 engage_qzone_feed 点赞或评论。", true);
     }

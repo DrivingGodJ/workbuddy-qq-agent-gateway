@@ -1,4 +1,4 @@
-import { conversationStatus } from "./client-status.js";
+import { conversationStatus, isSpeakerGreetingBusy, speakerGreetingStatus } from "./client-status.js";
 const HUB = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:3789";
 const els = Object.fromEntries([
   "deleteTargetButton", "deleteTargetHint", "deleteTargetDialog", "deleteTargetForm", "deleteTargetName", "deleteTargetStatus", "cancelDeleteTargetButton", "confirmDeleteTargetButton",
@@ -11,7 +11,8 @@ const els = Object.fromEntries([
   "addPrivateButton", "privateForm", "privateUserId", "privateDisplayName", "privateFormStatus", "savePrivateButton", "cancelPrivateButton",
   "hubStatus", "oneBotStatus", "codexStatus", "sessionDetails", "subscriptionDetails", "subscriptionCount", "subscriptionList",
   "agentSettingsDetails", "agentSettingsSummary", "agentSettingsForm", "agentModel", "agentReasoningEffort",
-  "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentModeExplanation",
+  "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentModeExplanation",
+  "agentSpeakerMorning", "agentSpeakerNoon", "agentSpeakerNight", "speakerGreetingsHint",
   "agentSettingsHint", "agentSettingsStatus", "saveAgentSettingsButton",
   "personaDetails", "personaSummary", "personaOwnerStyleSummary", "personaOwnerStyleRules", "personaPromptPreview",
   "personaNameForm", "personaNameInput", "personaNameStatus", "savePersonaNameButton",
@@ -273,7 +274,7 @@ function renderNavigation(all) {
   els.groupCount.textContent = String(all.length);
   els.agentGroupCount.textContent = String(groups.length);
   els.sourceCount.textContent = String(sources.length);
-  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
+  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.speakerGreetingActivity, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
   if (signature === navigationSignature) return;
   navigationSignature = signature;
   els.groupList.innerHTML = groups.length ? groups.map(renderNavigationButton).join("") : `<p class="empty compact">${query ? "没有匹配群聊" : "尚未配置 Agent 群"}</p>`;
@@ -364,8 +365,8 @@ function renderSelected(item) {
   els.replyEnabledLabel.textContent = replyEnabled ? "允许回复" : "不回复";
   els.replyEnabledHint.textContent = !replyEnabled ? "消息继续记录" : state?.agentDispatch?.enabled === false ? "总开关已暂停" : "仅影响当前会话";
   els.sessionDetails.hidden = !item || source;
-  els.deleteTargetButton.disabled = !item || source || Boolean(data?.busy || active.running || data?.qzoneActivity);
-  els.deleteTargetHint.textContent = data?.busy || active.running || data?.qzoneActivity
+  els.deleteTargetButton.disabled = !item || source || Boolean(data?.busy || active.running || data?.qzoneActivity || isSpeakerGreetingBusy(data));
+  els.deleteTargetHint.textContent = data?.busy || active.running || data?.qzoneActivity || isSpeakerGreetingBusy(data)
     ? "请先终止或等待当前任务完成，再删除会话。"
     : "移出白名单、解除订阅并归档本地状态，不退群、不删好友。";
   els.agentSettingsDetails.hidden = !item || source;
@@ -402,7 +403,7 @@ function renderSelected(item) {
   els.groupError.hidden = !error;
   els.groupError.textContent = error ? `本次回复失败，消息尚未标记为已处理。${error}` : "";
   els.cancelButton.hidden = source || !item;
-  els.cancelButton.disabled = !active.running;
+  els.cancelButton.disabled = !active.running && !isSpeakerGreetingBusy(data);
   els.composer.hidden = source || !item;
   els.sendButton.disabled = !item || source;
   els.promptInput.disabled = !item || source;
@@ -454,30 +455,46 @@ function renderAgentSettings(item) {
     contextTokenLimit: state?.ai?.autoCompactTokenLimit,
     workingMode: "agent",
     permissionMode: "workspaceWrite",
-    calendarRemindersEnabled: true
+    calendarRemindersEnabled: true,
+    homeAssistantPermission: "owner",
+    speakerGreetings: { morning: false, noon: false, night: false }
   };
   const model = modelInfo(config.model);
   els.agentSettingsSummary.textContent = `${permissionModeLabel(config.permissionMode)} · ${model?.displayName || config.model || "默认"} · ${effortLabel(config.reasoningEffort)} · 自动化${config.calendarRemindersEnabled === false ? "关" : "开"}`;
-  const nextSignature = JSON.stringify([item.key, config, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions]);
+  const nextSignature = JSON.stringify([item.key, config, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions, state?.ai?.speakerGreetingsAvailable]);
   if (!settingsDirty && settingsSignature !== nextSignature) {
     populateModelOptions(config.model);
     populateEffortOptions(config.reasoningEffort);
     populateContextOptions(config.contextTokenLimit);
     populatePermissionOptions(config.permissionMode, item.kind);
     els.agentCalendarRemindersEnabled.checked = config.calendarRemindersEnabled !== false;
+    populateHomeAssistantPermissionOptions(config.homeAssistantPermission || "owner", item.kind);
+    els.agentSpeakerMorning.checked = config.speakerGreetings?.morning === true;
+    els.agentSpeakerNoon.checked = config.speakerGreetings?.noon === true;
+    els.agentSpeakerNight.checked = config.speakerGreetings?.night === true;
     settingsSignature = nextSignature;
   }
   updateParameterExplanation(item);
-  const busy = Boolean(data.busy || data.activeReply?.running);
+  const busy = Boolean(data.busy || data.activeReply?.running || isSpeakerGreetingBusy(data));
   for (const control of [els.agentModel, els.agentReasoningEffort, els.agentContextTokenLimit]) control.disabled = busy;
   els.agentPermissionMode.disabled = busy;
   els.agentCalendarRemindersEnabled.disabled = busy;
+  els.agentHomeAssistantPermission.disabled = busy;
+  const greetingAvailable = state?.ai?.speakerGreetingsAvailable === true;
+  const homeEnabled = els.agentHomeAssistantPermission.value !== "disabled";
+  for (const control of [els.agentSpeakerMorning, els.agentSpeakerNoon, els.agentSpeakerNight]) {
+    control.disabled = busy || (!greetingAvailable || !homeEnabled) && !control.checked;
+  }
+  els.speakerGreetingsHint.textContent = !greetingAvailable
+    ? "尚未配置可用的小爱发言实体或 HA 凭证，不能开启问候；已开的可关掉。"
+    : !homeEnabled ? "请先开启智能家居与小爱发言权限；家居权限关闭时，已配置的问候暂停。"
+    : "北京时间，三个开关独立生效，默认关闭。只由小爱播报，不向 QQ 自动发消息；总开关或允许回复关闭时暂停。";
   els.saveAgentSettingsButton.disabled = busy || !settingsDirty;
   els.agentSettingsHint.textContent = busy
-    ? "WorkBuddy 正在处理本轮消息，结束后即可修改；未保存的选择会保留。"
+    ? "会话运行中暂不能修改权限；请先立即终止，或等待本轮结束。未保存的选择会保留。"
     : item.kind === "group" && els.agentPermissionMode.value === "dangerFullAccess"
-        ? `保存后从下一轮起生效；当前群的所有成员都能通过${agentName()}操作本机和发送本机文件。`
-        : "保存后从下一轮起生效；历史 thread 不变。本轮身份规则仍可继续收窄权限。";
+        ? `家居权限保存后立即生效；其他参数下轮生效。当前群的所有成员都能通过${agentName()}操作本机和发送本机文件。`
+        : "家居权限保存后立即生效；其他参数从下一轮起生效，历史 thread 不变。";
 }
 
 function renderPersona(item) {
@@ -571,11 +588,18 @@ function populatePermissionOptions(selectedPermission, targetType) {
     : (options[0]?.value || "readOnly");
 }
 
+function populateHomeAssistantPermissionOptions(selectedPermission, targetType) {
+  const options = (state?.ai?.homeAssistantPermissionOptions || []).filter((item) => (item.targetTypes || []).includes(targetType));
+  els.agentHomeAssistantPermission.innerHTML = options.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("");
+  els.agentHomeAssistantPermission.value = options.some((item) => item.value === selectedPermission) ? selectedPermission : "owner";
+}
+
 function updateParameterExplanation(item) {
   const model = modelInfo(els.agentModel.value);
   const effort = model?.supportedReasoningEfforts?.find((entry) => entry.reasoningEffort === els.agentReasoningEffort.value);
   const context = (state?.ai?.contextTokenOptions || []).find((entry) => String(entry.value) === els.agentContextTokenLimit.value);
   const permission = (state?.ai?.permissionModeOptions || []).find((entry) => entry.value === els.agentPermissionMode.value);
+  const homePermission = (state?.ai?.homeAssistantPermissionOptions || []).find((entry) => entry.value === els.agentHomeAssistantPermission.value);
   const capabilityNote = model?.reasoningCapabilitySource === "workbuddy-cli-global"
     ? "WorkBuddy 当前只公开全局 6 档，未提供逐模型能力矩阵；不支持的档位会由模型忽略。"
     : (model?.description || "");
@@ -585,7 +609,8 @@ function updateParameterExplanation(item) {
   els.agentModeExplanation.innerHTML = [
     `<p><strong>${escapeHtml(permission?.label || "执行权限")}</strong>${escapeHtml(permission?.description || "")}${escapeHtml(permissionWarning)}</p>`,
     `<p><strong>${escapeHtml(effortLabel(els.agentReasoningEffort.value))} · ${escapeHtml(formatTokenLimit(els.agentContextTokenLimit.value))}</strong>${escapeHtml([effort?.description, context?.description, capabilityNote].filter(Boolean).join("；"))}</p>`,
-    `<p><strong>通知自动化${els.agentCalendarRemindersEnabled.checked ? "已开启" : "已关闭"}</strong>${els.agentCalendarRemindersEnabled.checked ? "AUTO 通知可写入指定日历和“待办”提醒列表；写入成功后会在 QQ 回复中确认。" : "AUTO 通知仍会整理并回复，但网关不会执行日历或提醒事项写入。"}</p>`
+    `<p><strong>通知自动化${els.agentCalendarRemindersEnabled.checked ? "已开启" : "已关闭"}</strong>${els.agentCalendarRemindersEnabled.checked ? "AUTO 通知可写入指定日历和“待办”提醒列表；写入成功后会在 QQ 回复中确认。" : "AUTO 通知仍会整理并回复，但网关不会执行日历或提醒事项写入。"}</p>`,
+    `<p><strong>家居 · ${escapeHtml(homePermission?.label || "未配置")}</strong>${escapeHtml(homePermission?.description || "请刷新页面加载权限选项。")}</p>`
   ].join("");
 }
 
@@ -627,7 +652,7 @@ function renderConversation(item) {
 
   const data = item.data;
   const active = getActiveReply(data);
-  const relevantState = { lastCompletedReply: data.lastCompletedReply, pendingMessages: data.pendingMessages, processing: data.processing, activeReply: active, qzoneActivity: data.qzoneActivity, lastError: data.lastError, failedDelivery: data.failedDelivery };
+  const relevantState = { lastCompletedReply: data.lastCompletedReply, pendingMessages: data.pendingMessages, processing: data.processing, activeReply: active, qzoneActivity: data.qzoneActivity, speakerGreetingActivity: data.speakerGreetingActivity, lastError: data.lastError, failedDelivery: data.failedDelivery };
   const signature = `${item.key}:${agentName()}:${JSON.stringify(relevantState)}`;
   if (renderedKey === item.key && conversationSignature === signature) return;
   const structure = JSON.stringify({ ...relevantState, activeReply: { ...active, text: undefined, updatedAt: undefined } });
@@ -658,9 +683,13 @@ function renderConversation(item) {
     const activity = data.qzoneActivity;
     blocks.push(`<section class="conversation-section active-section" role="status"><div class="section-label"><span>QQ 空间实时状态</span><span class="running-label"><i></i>${escapeHtml(qzoneActivityShort(activity))}</span></div><article class="bubble agent live"><div class="bubble-text">${escapeHtml(qzoneActivityDetail(activity))}</div></article></section>`);
   }
+  if (data.speakerGreetingActivity) {
+    blocks.push(renderSpeakerGreeting(data.speakerGreetingActivity));
+  }
   if (active.waiting) {
     blocks.push(`<section class="conversation-section active-section" role="status"><div class="section-label"><span>${escapeHtml(agentName())}正在等待接话</span><span class="running-label"><i></i>运行中</span></div><article class="bubble agent live"><div class="bubble-text">新消息到达会立即继续判断<br>连续两分钟无人发消息后才结束；等待期间不调用模型</div></article></section>`);
-  } else if (active.running && !(["qzone-feed", "qzone-post"].includes(active.trigger) && data.qzoneActivity)) {
+  } else if (active.running && !(["qzone-feed", "qzone-post"].includes(active.trigger) && data.qzoneActivity)
+    && !["generating", "speaking"].includes(data.speakerGreetingActivity?.stage)) {
     blocks.push(`<section class="conversation-section active-section"><div class="section-label"><span>WorkBuddy 正在回复</span><span class="running-label"><i></i>实时生成</span></div><article class="bubble agent live"><div class="bubble-meta"><strong>${escapeHtml(agentName())} · WorkBuddy</strong><span>${escapeHtml(formatTrigger(active.trigger))}</span></div><div class="bubble-text" data-stream-output>${escapeHtml(active.text || "正在思考……")}<span class="stream-caret" aria-hidden="true"></span></div></article></section>`);
   }
   if (active.uploading) {
@@ -671,6 +700,13 @@ function renderConversation(item) {
   }
   if (!blocks.length) blocks.push('<div class="empty-state"><strong>这里暂时很安静</strong><span>新消息和实时 Agent 输出会直接出现在这里。</span></div>');
   replaceConversation(blocks.join(""), signature, false, item.key);
+}
+
+function renderSpeakerGreeting(activity) {
+  const status = speakerGreetingStatus(activity);
+  const accepted = activity.stage === "completed";
+  const title = [activity.label || "定时问候", activity.time].filter(Boolean).join(" · ");
+  return `<section class="conversation-section speaker-greeting-section" role="status" aria-label="小爱定时问候"><div class="section-label"><span>小爱定时问候 · ${escapeHtml(title)}</span><time>${escapeHtml(formatTime(activity.scheduledAt))}</time></div><article class="bubble agent${["generating", "speaking"].includes(activity.stage) ? " live" : ""}"><div class="bubble-meta"><strong>${escapeHtml(agentName())} · 小爱音箱</strong><span>${accepted ? "HA 已接受播报" : escapeHtml(status.short)}</span></div>${activity.text ? `<div class="bubble-text">${escapeHtml(activity.text)}</div>` : ""}<p class="field-note">${escapeHtml(status.detail)}</p></article></section>`;
 }
 
 function sourceProgressLabel(status) {
@@ -1153,6 +1189,8 @@ els.agentModel.addEventListener("change", () => {
 els.agentReasoningEffort.addEventListener("change", markSettingsDirty);
 els.agentContextTokenLimit.addEventListener("change", markSettingsDirty);
 els.agentPermissionMode.addEventListener("change", markSettingsDirty);
+els.agentHomeAssistantPermission.addEventListener("change", markSettingsDirty);
+for (const control of [els.agentSpeakerMorning, els.agentSpeakerNoon, els.agentSpeakerNight]) control.addEventListener("change", markSettingsDirty);
 els.agentCalendarRemindersEnabled.addEventListener("change", () => {
   updateParameterExplanation(currentTarget());
   markSettingsDirty();
@@ -1160,11 +1198,15 @@ els.agentCalendarRemindersEnabled.addEventListener("change", () => {
 els.agentSettingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const item = currentTarget();
-  if (!item || item.data.busy || item.data.activeReply?.running) return;
+  if (!item || item.data.busy || item.data.activeReply?.running || isSpeakerGreetingBusy(item.data)) return;
   const enablingGroupFullAccess = item.kind === "group"
     && els.agentPermissionMode.value === "dangerFullAccess"
     && item.data.codexConfig?.permissionMode !== "dangerFullAccess";
   if (enablingGroupFullAccess && !window.confirm(`开启完全访问后，当前群的所有成员都能通过${agentName()}操作整台 Mac，并发送本机任意位置的文件到本群。只读通知源不会获得该权限。确认开启吗？`)) return;
+  const enablingGroupHomeAccess = item.kind === "group"
+    && els.agentHomeAssistantPermission.value === "group"
+    && item.data.codexConfig?.homeAssistantPermission !== "group";
+  if (enablingGroupHomeAccess && !window.confirm("开启全群家居权限后，本群所有成员都能请求控制已开放的设备并让小爱音箱说话。不会开放 HA 账号或系统设置，其他群不受影响。确认开启吗？")) return;
   els.saveAgentSettingsButton.disabled = true;
   els.saveAgentSettingsButton.textContent = "保存中…";
   els.agentSettingsStatus.textContent = "正在保存";
@@ -1178,13 +1220,15 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
         reasoningEffort: els.agentReasoningEffort.value,
         contextTokenLimit: els.agentContextTokenLimit.value === "auto" ? "auto" : Number(els.agentContextTokenLimit.value),
         permissionMode: els.agentPermissionMode.value,
-        calendarRemindersEnabled: els.agentCalendarRemindersEnabled.checked
+        calendarRemindersEnabled: els.agentCalendarRemindersEnabled.checked,
+        homeAssistantPermission: els.agentHomeAssistantPermission.value,
+        speakerGreetings: { morning: els.agentSpeakerMorning.checked, noon: els.agentSpeakerNoon.checked, night: els.agentSpeakerNight.checked }
       })
     });
     item.data.codexConfig = response.codexConfig;
     settingsDirty = false;
     settingsSignature = "";
-    els.agentSettingsStatus.textContent = "已保存，下轮生效；当前 thread 保持不变。";
+    els.agentSettingsStatus.textContent = "已保存；家居权限立即生效，其他参数下轮生效。当前 thread 保持不变。";
     renderAgentSettings(item);
     scheduleRefresh();
   } catch (error) {

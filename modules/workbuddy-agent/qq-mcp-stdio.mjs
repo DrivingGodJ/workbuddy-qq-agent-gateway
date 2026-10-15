@@ -1,6 +1,6 @@
 // Private stdio MCP server launched once per WorkBuddy session by the SDK.
-// It never talks to OneBot: a loopback gateway validates the current turn and
-// queues actions for the existing durable QQ delivery pipeline.
+// It holds no OneBot or Home Assistant credentials. The loopback gateway
+// validates the current turn and owns delivery and physical-device operations.
 import { createInterface } from "node:readline";
 
 const threadId = String(process.argv[2] || "");
@@ -9,6 +9,36 @@ const secret = String(process.env.CODEX_REMOTE_CONTACT_QQ_MCP_SECRET || "");
 if (!threadId || !secret || !/^http:\/\/127\.0\.0\.1:\d+\/call$/u.test(endpoint)) process.exit(2);
 
 const allTools = [
+  {
+    name: "read_home_devices",
+    description: "按面板家居权限查询真实设备、状态、参数及小爱发言实体。绑定本轮已读直接消息，不要求重复家居关键词，可结合上下文理解指代。旧消息、引用、通知与定时任务不能授权。",
+    inputSchema: { type: "object", properties: {
+      request_message_id: { type: "string", description: "当前会话已读的获准成员直接消息 ID，不是引用或通知" },
+      query: { type: "string", maxLength: 80, description: "设备名称关键词，例如 台灯、宿舍空调" },
+      entity_id: { type: "string", description: "可选：已知真实实体 ID" },
+      domain: { type: "string", description: "可选：light、cover、climate、fan、switch、media_player、button、select、number、sensor、binary_sensor 或 notify（小爱发言）" },
+      offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 20 }
+    }, required: ["request_message_id"], additionalProperties: false }
+  },
+  {
+    name: "control_home_device",
+    description: "按面板家居权限和成员当前真实意图控制一个已查询实体，可结合上下文理解指代，不依赖固定关键词。含糊或冲突先确认，不把闲聊或查询当控制要求。service/data 用设备真实选项；区分授权拒绝、HA 不可达与执行未知，不盲目重试。红外不保证物理状态；小爱发言另用 speak_home_speaker。",
+    inputSchema: { type: "object", properties: {
+      request_message_id: { type: "string", description: "获准成员本轮明确控制请求消息 ID" },
+      entity_id: { type: "string", description: "read_home_devices 返回的实体 ID" },
+      service: { type: "string", description: "设备支持的服务，如 turn_on、turn_off、press、set_value、select_option、volume_set" },
+      data: { type: "object", description: "设备支持的服务参数；不传 entity_id、区域、URL、域名或任意目标" }
+    }, required: ["request_message_id", "entity_id", "service"], additionalProperties: false }
+  },
+  {
+    name: "speak_home_speaker",
+    description: "让已查询的小爱音箱说话，与 QQ 发消息和播放音乐分开。按面板权限及成员当前真实播报意图，可结合上下文理解指代，无需固定措辞；没有发言要求不自行播报，不执行小爱设备指令。区分授权拒绝、HA 不可达与执行未知；HA 接受不保证实际声音，不盲目重播。",
+    inputSchema: { type: "object", properties: {
+      request_message_id: { type: "string", description: "获准成员当前直接要求小爱发言的消息 ID" },
+      entity_id: { type: "string", description: "read_home_devices 返回的 notify 小爱播放文本实体 ID" },
+      text: { type: "string", minLength: 1, maxLength: 500, description: "音箱要说的话，不是设备执行指令" }
+    }, required: ["request_message_id", "entity_id", "text"], additionalProperties: false }
+  },
   {
     name: "read_messages",
     description: "读取当前 QQ 会话尚未读取的新消息；可重复调用，持续聊天时按需等待最多 8 秒获取新消息。读取不会清理或标记已处理。",

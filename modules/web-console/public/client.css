@@ -634,6 +634,9 @@ h2 { font-size: 17px; line-height: 1.25; letter-spacing: -0.015em; }
 .settings-switch input:checked::after { transform: translateX(18px); background: var(--success); }
 .settings-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-switch input:disabled { cursor: wait; opacity: 0.55; }
+.speaker-greeting-settings { display: grid; gap: 9px; margin: 0; padding: 9px; min-width: 0; border: 1px solid var(--border); border-radius: 9px; }
+.speaker-greeting-settings legend { padding: 0 4px; color: var(--text); font-size: 11px; }
+.speaker-greeting-settings .field-note { margin: 0; }
 .parameter-explanation {
   display: grid;
   border: 1px solid #263743;
@@ -754,6 +757,7 @@ h2 { font-size: 17px; line-height: 1.25; letter-spacing: -0.015em; }
 .bubble-meta { justify-content: space-between; gap: 16px; margin-bottom: 7px; color: var(--muted); font-size: 10px; }
 .bubble-meta strong { color: #c9d1d8; font-weight: 650; }
 .bubble-text { overflow-wrap: anywhere; font-size: 14px; line-height: 1.62; white-space: pre-wrap; }
+.speaker-greeting-section .field-note { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .message-state { margin-top: 8px; color: var(--warning); font-size: 10px; }
 .attachment-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .attachment-row span { border: 1px solid #34404b; border-radius: 999px; padding: 4px 8px; color: #aab6c2; font-size: 10px; }

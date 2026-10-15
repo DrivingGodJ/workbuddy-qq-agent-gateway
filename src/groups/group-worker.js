@@ -28,7 +28,7 @@ import {
 export class GroupWorker {
   constructor({
     store, codex, oneBot, mediaManager, fileManager, stickerManager = null, stickerLabeler = null, triggerManager,
-    subscriptionStore = null, automationClient = null, persona = null, targetNameResolver = () => null,
+    subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null,
     sharedWorkspaceRoot = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs
   } = {}) {
     this.store = store;
@@ -41,6 +41,7 @@ export class GroupWorker {
     this.triggerManager = triggerManager;
     this.subscriptionStore = subscriptionStore;
     this.automationClient = automationClient;
+    this.homeAssistant = homeAssistant;
     this.persona = persona;
     this.targetNameResolver = targetNameResolver;
     this.sharedWorkspaceRoot = sharedWorkspaceRoot ? resolve(sharedWorkspaceRoot) : null;
@@ -50,6 +51,7 @@ export class GroupWorker {
     this.qzone = null;
     this.running = new Map();
     this.qzoneReservations = new Map();
+    this.queuedChat = new Map();
     this.waitingChat = new Map();
     this.olderChatPermits = new Set();
     this.live = new Map();
@@ -78,7 +80,10 @@ export class GroupWorker {
     const id = String(groupId);
     if (!this.canRun(id)) return Promise.resolve();
     if (this.store.rateLimitUntil(id) > Date.now()) return Promise.resolve();
-    if (this.qzoneReservations.has(id) && !this.olderChatPermits.has(id)) return this.qzoneReservations.get(id);
+    if (this.qzoneReservations.has(id) && !this.olderChatPermits.has(id)) {
+      if (!this.store.snapshot(id).pendingTrigger) return this.qzoneReservations.get(id);
+      return this.queueChatBehindReservation(id);
+    }
     if (this.running.has(id)) return this.running.get(id);
     if (this.taskGate?.blocked) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
@@ -109,6 +114,27 @@ export class GroupWorker {
     });
     this.running.set(id, run);
     return run;
+  }
+
+  queueChatBehindReservation(id) {
+    if (this.queuedChat.has(id)) return this.queuedChat.get(id);
+    const previous = this.qzoneReservations.get(id);
+    let release;
+    const reservation = new Promise((resolve) => { release = resolve; });
+    this.qzoneReservations.set(id, reservation);
+    const waiting = previous.then(() => {
+      // Without a later job, normal chat keeps its two-minute followup window.
+      if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
+      else this.olderChatPermits.add(id);
+      return this.kick(id);
+    }).finally(() => {
+      this.olderChatPermits.delete(id);
+      if (this.queuedChat.get(id) === waiting) this.queuedChat.delete(id);
+      if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
+      release();
+    });
+    this.queuedChat.set(id, waiting);
+    return waiting;
   }
 
   async refreshInstructions(groupId) {
@@ -198,7 +224,7 @@ export class GroupWorker {
     const workspaceDir = this.workspaceDirFor(groupId);
     if (workspaceDir) await mkdir(workspaceDir, { recursive: true });
     const options = optionsForConversation(group);
-    const scheduledSandbox = qqToolContext && this.codex?.supportsQqMcp
+    const scheduledSandbox = trigger === "speaker-greeting" ? "readOnly" : qqToolContext && this.codex?.supportsQqMcp
       ? options.permissionMode
       : "readOnly";
     let threadId = group.threadId;
@@ -224,7 +250,7 @@ export class GroupWorker {
         this.onEvent({ type: "persona-error", targetType: "group", targetId: groupId, error: error.message, at: new Date().toISOString() });
       }
     }
-    this.setLive(groupId, { status: "running", threadId, trigger, text: "正在处理 QQ 空间任务…", startedAt: new Date().toISOString(), error: null });
+    this.setLive(groupId, { status: "running", threadId, trigger, text: trigger === "speaker-greeting" ? "正在准备小爱问好…" : "正在处理 QQ 空间任务…", startedAt: new Date().toISOString(), error: null });
     try {
       const result = await this.codex.runTurn({
         groupId, threadId, prompt: qzonePrompt,
@@ -503,6 +529,7 @@ export class GroupWorker {
     } : useMcpRead ? createLiveConversationTools({
       store: this.store, targetId: groupId, targetType: "group", oneBot: this.oneBot,
       fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+      homeAssistant: this.homeAssistant,
       onEvent: this.onEvent,
       canRun: () => this.canRun(groupId),
       trigger: work.trigger, triggerMessages: work.messages, security,

@@ -40,6 +40,9 @@ fi
 if [ -z "${ONEBOT_ACCESS_TOKEN:-}" ]; then
   export ONEBOT_ACCESS_TOKEN="$(read_keychain_secret onebot-api-token || true)"
 fi
+if [ "${CODEX_REMOTE_CONTACT_HA_ENABLED:-0}" = "1" ] && [ -z "${CODEX_REMOTE_CONTACT_HA_TOKEN:-}" ]; then
+  export CODEX_REMOTE_CONTACT_HA_TOKEN="$(read_keychain_secret home-assistant-api-token || true)"
+fi
 
 if [ "$CODEX_REMOTE_CONTACT_DISABLE_AUTH" != "1" ] && [ -z "$CODEX_REMOTE_CONTACT_API_TOKEN" ]; then
   echo "Hub access credentials are missing from the macOS Keychain." >&2

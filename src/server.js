@@ -5,6 +5,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MacActionClient } from "./automation/macos-actions.js";
+import { HomeAssistantClient } from "./automation/home-assistant.js";
 import { CodexClient } from "./codex/client.js";
 import { WorkBuddyClient } from "./workbuddy/client.js";
 import { PersonaStore } from "./persona/persona-store.js";
@@ -24,6 +25,7 @@ import { removeGatewayTarget, targetBusyForRemoval } from "./qq/target-removal.j
 import { EphemeralStickerCurator, StickerCurationCoordinator } from "./qq/sticker-curator.js";
 import { isUsableStickerDescription } from "./qq/sticker-label.js";
 import { QzoneCoordinator } from "./qq/qzone-coordinator.js";
+import { SpeakerGreetingCoordinator } from "./qq/speaker-greeting-coordinator.js";
 import { normalizeOneBotGroupMessage, normalizeOneBotGroupPoke, normalizeOneBotPrivateMessage, formatLocalTime, renderOneBotMessageText } from "./qq/message-normalizer.js";
 import { OneBotClient } from "./qq/onebot-client.js";
 import { PrivateWorker } from "./qq/private-worker.js";
@@ -128,6 +130,11 @@ const permissionModeOptions = [
   { value: "workspaceWrite", label: "工作区写入", description: "可在当前目标工作区内创建、修改和运行文件", targetTypes: ["group", "private"] },
   { value: "dangerFullAccess", label: "完全访问", description: "可操作整台 Mac 并发送本机文件；群聊启用后所有群成员的触发消息都会获得此权限", targetTypes: ["group", "private"] }
 ];
+const homeAssistantPermissionOptions = [
+  { value: "disabled", label: "关闭", description: "这个会话不能读取或控制智能家居，也不能让小爱音箱说话", targetTypes: ["group", "private"] },
+  { value: "owner", label: "仅 OWNER（你本人）", description: "只接受你本人在当前会话发出的家居和音箱请求；其他成员不能授权", targetTypes: ["group", "private"] },
+  { value: "group", label: "全群成员", description: "本群成员都可请求读取、控制已开放的家居设备或让小爱音箱说话；不开放 HA 账号和系统设置", targetTypes: ["group"] }
+];
 const defaultCodexConfig = {
   model: codexModel,
   reasoningEffort: codexEffort,
@@ -136,7 +143,9 @@ const defaultCodexConfig = {
     : (codexAutoCompactTokenLimit || 200_000),
   workingMode: "agent",
   permissionMode: "workspaceWrite",
-  calendarRemindersEnabled: false
+  calendarRemindersEnabled: false,
+  homeAssistantPermission: "owner",
+  speakerGreetings: { morning: false, noon: false, night: false }
 };
 const codexExecutableArgs = codexAutoCompactTokenLimit == null ? [] : [
   "-c", `model_auto_compact_token_limit=${codexAutoCompactTokenLimit}`,
@@ -298,6 +307,14 @@ const targetUpdateStream = new TargetUpdateStream({ emit: publishTargetUpdate })
 const triggerManager = new TriggerManager({ store, allowedGroups, periodicMinutes: periodicTriggerMinutes });
 const privateTriggerManager = new TriggerManager({ store: privateStore, allowedGroups: null });
 const taskGate = new AgentTaskGate();
+const homeAssistant = new HomeAssistantClient({
+  enabled: process.env.CODEX_REMOTE_CONTACT_HA_ENABLED === "1",
+  baseUrl: process.env.CODEX_REMOTE_CONTACT_HA_BASE_URL || "",
+  token: process.env.CODEX_REMOTE_CONTACT_HA_TOKEN || "",
+  allowedButtons: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_BUTTONS || "").split(",")),
+  allowedSpeakers: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_SPEAKERS || "").split(","))
+});
+const speakerGreetingsAvailable = homeAssistant.enabled && Boolean(homeAssistant.baseUrl && homeAssistant.token && homeAssistant.allowedSpeakers.size);
 const dailyStyle = new DailyStyleCoordinator({
   filePath: personaStyleSamplesPath, workspaceRoot: personaStyleWorkspaceRoot,
   persona: personaStore, codex, gate: taskGate,
@@ -307,6 +324,7 @@ const dailyStyle = new DailyStyleCoordinator({
 await dailyStyle.init();
 const worker = new GroupWorker({
   store, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager, subscriptionStore, automationClient, persona: personaStore,
+  homeAssistant,
   targetNameResolver: (groupId) => groupMetadata[groupId]?.groupName || null,
   sharedWorkspaceRoot: groupWorkspaceRoot,
   taskGate,
@@ -315,6 +333,7 @@ const worker = new GroupWorker({
 });
 const privateWorker = new PrivateWorker({
   store: privateStore, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager: privateTriggerManager, subscriptionStore, automationClient, persona: personaStore,
+  homeAssistant,
   targetNameResolver: (userId) => privateMetadata[userId]?.displayName || null,
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && !targetAllowlist.isRemoved("private", id) && !removingTargets.has(`private:${id}`),
@@ -328,6 +347,18 @@ const qzone = new QzoneCoordinator({
 });
 worker.qzone = qzone;
 privateWorker.qzone = qzone;
+const speakerGreetings = new SpeakerGreetingCoordinator({
+  filePath: join(dataDir, "speaker-greetings.json"), homeAssistant,
+  listTargets: () => [
+    ...store.listGroups().filter((item) => allowedGroups.includes(item.groupId) && !removingTargets.has(`group:${item.groupId}`))
+      .map((item) => ({ type: "group", id: item.groupId, store, worker })),
+    ...privateStore.listGroups().filter((item) => !targetAllowlist.isRemoved("private", item.groupId) && !removingTargets.has(`private:${item.groupId}`))
+      .map((item) => ({ type: "private", id: item.groupId, store: privateStore, worker: privateWorker }))
+  ],
+  canRun: () => agentDispatchStore.isEnabled(), onEvent: recordEvent,
+  onActivityChange: () => broadcast({ type: "speaker-greeting-activity", state: publicState() })
+});
+await speakerGreetings.init();
 const stickerCuration = new StickerCurationCoordinator({
   filePath: stickerCurationPath, stickerManager, gate: taskGate,
   selector: new EphemeralStickerCurator({ codex, workspaceRoot: stickerCurationWorkspaceRoot,
@@ -349,6 +380,7 @@ const threadReservations = new ThreadReservationManager({
 await threadReservations.start();
 stickerCuration.start();
 dailyStyle.start();
+speakerGreetings.start();
 
 const seenMessages = new Map();
 const seenTtlMs = 10 * 60 * 1000;
@@ -584,8 +616,9 @@ async function handleApi(req, res, url) {
     const targetType = body.targetType === "private" ? "private" : "group";
     const targetId = String(body.targetId || body.groupId || "");
     assertTarget(targetType, targetId);
+    const greetingCancelled = await speakerGreetings.cancel(targetType, targetId);
     const cancelled = targetType === "private" ? await privateWorker.cancel(targetId) : await worker.cancel(targetId);
-    sendJson(res, 200, { status: cancelled ? "cancelling" : "idle", targetType, targetId });
+    sendJson(res, 200, { status: cancelled || greetingCancelled ? "cancelling" : "idle", targetType, targetId });
     return;
   }
   const replySwitch = url.pathname.match(/^\/api\/qq\/(groups|private)\/([^/]+)\/reply-enabled$/);
@@ -599,7 +632,10 @@ async function handleApi(req, res, url) {
     const targetWorker = targetType === "private" ? privateWorker : worker;
     const manager = targetType === "private" ? privateTriggerManager : triggerManager;
     await targetStore.setReplyEnabled(targetId, body.enabled);
-    if (!body.enabled) await targetWorker.cancel(targetId);
+    if (!body.enabled) {
+      await speakerGreetings.cancel(targetType, targetId);
+      await targetWorker.cancel(targetId);
+    }
     else {
       await checkSubscriptionSchedule();
       targetWorker.recoverStickerLabels(targetId).catch((error) => console.warn(`Sticker recovery failed for ${targetType}:${targetId}: ${error.message}`));
@@ -616,8 +652,9 @@ async function handleApi(req, res, url) {
     assertTarget(targetType, targetId);
     const targetStore = targetType === "private" ? privateStore : store;
     const conversation = targetStore.snapshot(targetId);
-    if (conversation.busy) throw new HttpError(409, "Codex 正在回复，请在本轮结束后再修改会话设置");
-    const config = validateCodexConfig(parseJson(rawBody), { targetType });
+    if (conversation.busy || targetBusyForRemoval(targetType === "private" ? privateWorker : worker, conversation,
+      speakerGreetingBusy(targetType, targetId))) throw new HttpError(409, "会话仍有进行中或排队的任务，请结束后再修改设置");
+    const config = validateCodexConfig(parseJson(rawBody), { targetType, currentConfig: conversation.codexConfig });
     const saved = await targetStore.setCodexConfig(targetId, config);
     if (saved.model !== conversation.codexConfig.model) {
       const restoredSubscriptions = await subscriptionStore.retryRateLimitedForTarget(targetType, targetId);
@@ -660,8 +697,8 @@ async function handleApi(req, res, url) {
     const targetWorker = type === "private" ? privateWorker : worker;
     const conversation = targetStore.listGroups().find((item) => item.groupId === id);
     if (!conversation && !targetAllowlist.isRemoved(type, id)) throw new HttpError(404, "会话不存在");
-    if (targetBusyForRemoval(targetWorker, conversation, qzone.activityFor(type, id))) {
-      throw new HttpError(409, "会话还有回复、接话、动态或表情任务。请先终止或等待任务完成再删除");
+    if (targetBusyForRemoval(targetWorker, conversation, qzone.activityFor(type, id) || speakerGreetingBusy(type, id))) {
+      throw new HttpError(409, "会话还有回复、接话、动态、小爱问好或表情任务。请先终止或等待任务完成再删除");
     }
     removingTargets.add(key);
     try {
@@ -1085,6 +1122,7 @@ function publicState() {
       ...view,
       diagnostics: codex.diagnostics?.snapshot(group.threadId) || null,
       qzoneActivity: qzone.activityFor("group", group.groupId),
+      speakerGreetingActivity: speakerGreetings.activityFor("group", group.groupId),
       targetType: "group",
       targetId: group.groupId,
       conversationType: "AGENT_CHAT_GROUP",
@@ -1099,6 +1137,7 @@ function publicState() {
       ...view,
       diagnostics: codex.diagnostics?.snapshot(conversation.threadId) || null,
       qzoneActivity: qzone.activityFor("private", conversation.groupId),
+      speakerGreetingActivity: speakerGreetings.activityFor("private", conversation.groupId),
       userId: conversation.groupId,
       displayName: metadata.displayName || null,
       targetType: "private",
@@ -1137,7 +1176,9 @@ function publicState() {
       autoCompactTokenScope: codexAutoCompactTokenScope,
       availableModels: codexModels,
       contextTokenOptions,
-      permissionModeOptions
+      permissionModeOptions,
+      homeAssistantPermissionOptions,
+      speakerGreetingsAvailable
     },
     channels: { qq: true },
     qq: {
@@ -1307,7 +1348,7 @@ function validateQqId(value, label) {
   return id;
 }
 
-function validateCodexConfig(value, { targetType = "group" } = {}) {
+function validateCodexConfig(value, { targetType = "group", currentConfig = null } = {}) {
   const model = String(value?.model || "").trim();
   const selectedModel = codexModels.find((item) => item.model === model);
   if (!selectedModel) throw new HttpError(400, "请选择当前 Codex 账号可用的模型");
@@ -1330,7 +1371,28 @@ function validateCodexConfig(value, { targetType = "group" } = {}) {
     throw new HttpError(400, "请选择是否允许当前会话写入日历和提醒事项");
   }
   const calendarRemindersEnabled = value.calendarRemindersEnabled;
-  return { model, reasoningEffort, contextTokenLimit, workingMode, permissionMode, calendarRemindersEnabled };
+  const homeAssistantPermission = String(value?.homeAssistantPermission ?? currentConfig?.homeAssistantPermission ?? "owner");
+  const homePermission = homeAssistantPermissionOptions.find((item) => item.value === homeAssistantPermission);
+  if (!homePermission || !homePermission.targetTypes.includes(targetType)) {
+    throw new HttpError(400, "请选择可用的智能家居权限；私聊不能开放全群权限");
+  }
+  const greetingSlots = ["morning", "noon", "night"];
+  const speakerGreetings = value?.speakerGreetings === undefined
+    ? (currentConfig?.speakerGreetings || { morning: false, noon: false, night: false })
+    : value.speakerGreetings;
+  if (!speakerGreetings || typeof speakerGreetings !== "object" || Array.isArray(speakerGreetings)
+    || Object.keys(speakerGreetings).length !== greetingSlots.length
+    || !greetingSlots.every((slot) => typeof speakerGreetings[slot] === "boolean")) {
+    throw new HttpError(400, "小爱定时问候须分别设置早上、中午和晚上的开关");
+  }
+  const enablingGreeting = greetingSlots.some((slot) => speakerGreetings[slot] && currentConfig?.speakerGreetings?.[slot] !== true);
+  if (enablingGreeting && homeAssistantPermission === "disabled") {
+    throw new HttpError(400, "请先开启当前会话的智能家居与小爱发言权限");
+  }
+  if (enablingGreeting && !speakerGreetingsAvailable) {
+    throw new HttpError(400, "请先配置可用的小爱发言实体和 HA 凭证，再开启定时问候");
+  }
+  return { model, reasoningEffort, contextTokenLimit, workingMode, permissionMode, calendarRemindersEnabled, homeAssistantPermission, speakerGreetings: { ...speakerGreetings } };
 }
 
 function normalizeWorkBuddyContextLimit(value) {
@@ -1630,6 +1692,11 @@ function uniqueStrings(values) {
   return [...new Set((values || []).map(String).map((value) => value.trim()).filter(Boolean))];
 }
 
+function speakerGreetingBusy(type, id) {
+  const activity = speakerGreetings.activityFor(type, id);
+  return ["queued", "generating", "speaking"].includes(activity?.stage) ? activity : null;
+}
+
 class HttpError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -1641,6 +1708,7 @@ async function shutdown() {
   triggerManager.stop();
   privateTriggerManager.stop();
   qzone.stop();
+  speakerGreetings.stop();
   stickerCuration.stop();
   dailyStyle.stop();
   threadReservations.stop();

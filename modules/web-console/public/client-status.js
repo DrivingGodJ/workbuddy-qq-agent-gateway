@@ -1,3 +1,21 @@
+export function isSpeakerGreetingBusy(data) {
+  return ["queued", "generating", "speaking"].includes(data?.speakerGreetingActivity?.stage);
+}
+
+export function speakerGreetingStatus(activity = {}) {
+  const label = activity.label || "定时问候";
+  const states = {
+    queued: { short: "问候排队", detail: `${label}已排队 · 等待当前会话前序任务`, tone: "pending" },
+    generating: { short: "生成问候", detail: `正在生成${label}的小爱播报内容`, tone: "running" },
+    speaking: { short: "小爱播报", detail: `${label}播报指令正在提交 · 结果以回执为准`, tone: "running" },
+    completed: { short: "问候完成", detail: "HA 已接受小爱播报指令，无法核实实际声音；未发送到 QQ", tone: "idle" },
+    failed: { short: "问候失败", detail: activity.error || "问候未完成，未确认播报成功", tone: "error" },
+    cancelled: { short: "问候取消", detail: "本次定时问候已取消，不会自动重发", tone: "idle" },
+    uncertain: { short: "播报未知", detail: activity.error || "播报请求结果未知，请勿自动重试，以免重复打扰", tone: "attention" }
+  };
+  return states[activity.stage] || { short: "定时问候", detail: "等待下一次已开启的问候时间", tone: "idle" };
+}
+
 export function conversationStatus(data, state = {}, now = Date.now()) {
   const active = data?.activeReply || {};
   const diagnostics = data?.diagnostics;
@@ -6,6 +24,7 @@ export function conversationStatus(data, state = {}, now = Date.now()) {
   if (state.agentDispatch?.enabled === false) return { short: "已暂停", detail: "总开关已暂停 · 消息继续记录", tone: "idle" };
   if (active.uploading) return { short: "上传中", detail: active.text || "QQ 正在上传文件", tone: "running" };
   if (stage === "compacting") return { short: "压缩中", detail: "正在压缩上下文 · 最多等待六分钟，不是 QQ 发送中", tone: "running" };
+  if (isSpeakerGreetingBusy(data)) return speakerGreetingStatus(data.speakerGreetingActivity);
   if (data?.qzoneActivity) {
     const activity = data.qzoneActivity;
     if (activity.stage === "queued") return { short: "动态排队", detail: "动态任务已排队 · 等待当前会话前序任务", tone: "pending" };
@@ -29,6 +48,7 @@ export function conversationStatus(data, state = {}, now = Date.now()) {
   if (data?.threadLock?.status === "external_writer") return { short: "被占用", detail: "会话被其他写入端占用 · 网关自动重试", tone: "attention" };
   if (data?.lastError || active.error) return { short: "失败", detail: "本轮失败 · 消息和发送记录保留", tone: "error" };
   if (data?.pendingCount) return { short: String(data.pendingCount), detail: `${data.pendingCount} 条消息等待处理`, tone: "pending" };
+  if (data?.speakerGreetingActivity) return speakerGreetingStatus(data.speakerGreetingActivity);
   const silent = diagnostics?.stage === "complete" && data?.lastCompletedReply?.completedAt
     && diagnostics.startedAtMs > Date.parse(data.lastCompletedReply.completedAt);
   return { short: "空闲", detail: silent ? "本轮正常结束，未新增 QQ 回复" : "消息已处理完毕", tone: "idle" };

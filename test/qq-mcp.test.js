@@ -49,7 +49,7 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   };
   const groupTools = list("group-thread");
   assert.deepEqual(groupTools, list("private-thread"));
-  assert.equal(groupTools.length, 18);
+  assert.equal(groupTools.length, 21);
   for (const name of ["send_file", "send_image", "recall_message", "post_qzone", "read_qzone_feeds", "engage_qzone_feed", "get_group_management", "manage_group"]) {
     assert.ok(groupTools.some((tool) => tool.name === name));
   }
@@ -57,6 +57,10 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
     assert.equal(groupTools.some((tool) => tool.name === name), false);
   }
   const byName = Object.fromEntries(groupTools.map((tool) => [tool.name, tool]));
+  assert.ok(byName.read_home_devices.inputSchema.required.includes("request_message_id"));
+  assert.ok(byName.control_home_device.inputSchema.required.includes("request_message_id"));
+  assert.ok(byName.speak_home_speaker.inputSchema.required.includes("request_message_id"));
+  assert.equal(byName.speak_home_speaker.inputSchema.properties.text.maxLength, 500);
   assert.deepEqual(byName.send_reaction.inputSchema.oneOf, [{ required: ["face"] }, { required: ["sticker_id"] }]);
   assert.equal(byName.send_message.inputSchema.properties.reply_to_message_id.pattern, "^-?[0-9]+$");
   assert.deepEqual(byName.poke_member.inputSchema.properties.user_id.oneOf[0], { const: "sender" });

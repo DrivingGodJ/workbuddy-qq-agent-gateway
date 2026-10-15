@@ -13,7 +13,8 @@ const msg = (id, name, text, extra = {}) => ({
   senderRole: "member", images: [], attachments: [], ...extra
 });
 const config = { model: "hy4-preview", reasoningEffort: "low", contextTokenLimit: 200000,
-  workingMode: "agent", permissionMode: "workspaceWrite", calendarRemindersEnabled: false };
+  workingMode: "agent", permissionMode: "workspaceWrite", calendarRemindersEnabled: false, homeAssistantPermission: "owner",
+  speakerGreetings: { morning: false, noon: false, night: false } };
 const sub = (targetId) => ({ id: "demo-sub-" + targetId, targetType: "group", targetId,
   sourceGroupId: "300000001", sourceGroupName: "课程通知（演示）", mode: "AUTO",
   intakeMode: "ADMIN_ONLY", collectionDelayMinutes: 10, enabled: true,
@@ -36,6 +37,7 @@ const state = {
     promptPreview: "<laodai_persona>\n你是老代。所有会话共用同一份人格。\n每日表达总结：短句优先，内容较长时自然断句\n</laodai_persona>"
   },
   ai: { provider: "workbuddy-agent-sdk", model: "hy4-preview", reasoningEffort: "low",
+    speakerGreetingsAvailable: process.env.DEMO_SPEAKER_GREETINGS_AVAILABLE !== "0",
     availableModels: ["auto", "hy4-preview", "hy3"].map((model) => ({
       model, displayName: model === "auto" ? "自动选择" : model, defaultReasoningEffort: "low",
       reasoningCapabilitySource: "workbuddy-cli-global",
@@ -50,6 +52,11 @@ const state = {
     ],
     workModeOptions: [
       {value:"agent",label:"Agent · 执行任务",description:"按当前权限使用工具并执行任务"}
+    ],
+    homeAssistantPermissionOptions: [
+      {value:"disabled",label:"关闭",targetTypes:["group","private"],description:"不允许当前会话读取或控制智能家居，也不能让小爱音箱说话"},
+      {value:"owner",label:"仅 OWNER（你本人）",targetTypes:["group","private"],description:"只接受你本人在当前会话发出的家居和音箱请求"},
+      {value:"group",label:"全群成员",targetTypes:["group"],description:"本群成员都可请求控制已开放的家居设备和小爱音箱"}
     ],
     permissionModeOptions: [
       {value:"readOnly",label:"只读",targetTypes:["group","private"],description:"不修改本机文件"},
@@ -71,6 +78,12 @@ const state = {
         ...(process.env.DEMO_QZONE_ACTIVITY ? {
           qzoneActivity: { kind:"feed", stage:"reading", processed:3, total:12, startedAt:now },
           activeReply: { running:true, text:"正在处理 QQ 空间任务…", status:"running", trigger:"qzone-feed", startedAt:now }
+        } : {}),
+        ...(process.env.DEMO_SPEAKER_GREETING_STAGE ? {
+          speakerGreetingActivity: { jobId: "demo-speaker-greeting", stage: process.env.DEMO_SPEAKER_GREETING_STAGE,
+            label: "早安", time: "07:00", scheduledAt: now,
+            text: ["generating", "queued"].includes(process.env.DEMO_SPEAKER_GREETING_STAGE) ? "" : "早上好\n今天也顺顺利利",
+            error: process.env.DEMO_SPEAKER_GREETING_STAGE === "uncertain" ? "播报结果未知，未自动重试" : null }
         } : {})
       })
     },

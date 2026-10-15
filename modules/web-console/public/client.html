@@ -127,6 +127,26 @@
                 <span><strong>通知自动化权限</strong><small>允许这个会话把通知写入“学习 / 社团 / 活动”日历和“待办”提醒列表</small></span>
                 <input id="agentCalendarRemindersEnabled" type="checkbox" role="switch" checked />
               </label>
+              <label for="agentHomeAssistantPermission">智能家居与小爱发言权限
+                <select id="agentHomeAssistantPermission" required></select>
+                <small class="field-note">独立于本机执行权限。全群成员仅对当前群开放，定时任务和通知内容不能授权家居操作。</small>
+              </label>
+              <fieldset class="speaker-greeting-settings" aria-describedby="speakerGreetingsHint">
+                <legend>小爱定时问候</legend>
+                <label class="settings-switch" for="agentSpeakerMorning">
+                  <span><strong>早安 · 07:00</strong><small>由本会话生成早安问候并交给小爱播报</small></span>
+                  <input id="agentSpeakerMorning" type="checkbox" role="switch" aria-label="早安问候 07:00" />
+                </label>
+                <label class="settings-switch" for="agentSpeakerNoon">
+                  <span><strong>午安 · 13:00</strong><small>由本会话生成午间问候并交给小爱播报</small></span>
+                  <input id="agentSpeakerNoon" type="checkbox" role="switch" aria-label="午安问候 13:00" />
+                </label>
+                <label class="settings-switch" for="agentSpeakerNight">
+                  <span><strong>晚安 · 23:30</strong><small>由本会话生成晚安问候并交给小爱播报</small></span>
+                  <input id="agentSpeakerNight" type="checkbox" role="switch" aria-label="晚安问候 23:30" />
+                </label>
+                <p id="speakerGreetingsHint" class="field-note" role="status">北京时间，三个开关独立生效，默认全部关闭。</p>
+              </fieldset>
               <div id="agentModeExplanation" class="parameter-explanation" aria-live="polite"></div>
               <p id="agentSettingsHint" class="form-hint">保存后从下一轮起生效；历史 thread 不变。</p>
               <p id="agentSettingsStatus" class="form-status" role="status" aria-live="polite"></p>

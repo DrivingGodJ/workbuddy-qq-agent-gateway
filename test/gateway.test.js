@@ -899,7 +899,9 @@ test("per-conversation Codex settings persist independently", async (t) => {
     contextTokenLimit: 200_000,
     workingMode: "agent",
     permissionMode: "workspaceWrite",
-    calendarRemindersEnabled: true
+    calendarRemindersEnabled: true,
+    homeAssistantPermission: "owner",
+    speakerGreetings: { morning: false, noon: false, night: false }
   };
   const first = new SessionStore({ filePath, defaultCodexConfig: defaults });
   await first.init({ allowedGroups: ["123", "456"] });
@@ -913,7 +915,9 @@ test("per-conversation Codex settings persist independently", async (t) => {
     contextTokenLimit: 100_000,
     workingMode: "agent",
     permissionMode: "workspaceWrite",
-    calendarRemindersEnabled: true
+    calendarRemindersEnabled: true,
+    homeAssistantPermission: "owner",
+    speakerGreetings: { morning: false, noon: false, night: false }
   });
   assert.deepEqual(second.snapshot("456").codexConfig, defaults);
 });

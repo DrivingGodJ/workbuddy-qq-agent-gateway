@@ -24,7 +24,7 @@ import {
 } from "../security/subscription-policy.js";
 
 export class PrivateWorker {
-  constructor({ store, codex, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, persona = null, targetNameResolver = () => null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs } = {}) {
+  constructor({ store, codex, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs } = {}) {
     this.store = store;
     this.codex = codex;
     this.oneBot = oneBot;
@@ -35,6 +35,7 @@ export class PrivateWorker {
     this.triggerManager = triggerManager;
     this.subscriptionStore = subscriptionStore;
     this.automationClient = automationClient;
+    this.homeAssistant = homeAssistant;
     this.persona = persona;
     this.targetNameResolver = targetNameResolver;
     this.canRun = (id) => canRun(id) && this.store.snapshot(id).replyEnabled !== false;
@@ -43,6 +44,7 @@ export class PrivateWorker {
     this.qzone = null;
     this.running = new Map();
     this.qzoneReservations = new Map();
+    this.queuedChat = new Map();
     this.waitingChat = new Map();
     this.olderChatPermits = new Set();
     this.live = new Map();
@@ -75,7 +77,10 @@ export class PrivateWorker {
     const id = String(userId);
     if (!this.canRun(id)) return Promise.resolve();
     if (this.store.rateLimitUntil(id) > Date.now()) return Promise.resolve();
-    if (this.qzoneReservations.has(id) && !this.olderChatPermits.has(id)) return this.qzoneReservations.get(id);
+    if (this.qzoneReservations.has(id) && !this.olderChatPermits.has(id)) {
+      if (!this.store.snapshot(id).pendingTrigger) return this.qzoneReservations.get(id);
+      return this.queueChatBehindReservation(id);
+    }
     if (this.running.has(id)) return this.running.get(id);
     if (this.taskGate?.blocked) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
@@ -106,6 +111,26 @@ export class PrivateWorker {
     });
     this.running.set(id, run);
     return run;
+  }
+
+  queueChatBehindReservation(id) {
+    if (this.queuedChat.has(id)) return this.queuedChat.get(id);
+    const previous = this.qzoneReservations.get(id);
+    let release;
+    const reservation = new Promise((resolve) => { release = resolve; });
+    this.qzoneReservations.set(id, reservation);
+    const waiting = previous.then(() => {
+      if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
+      else this.olderChatPermits.add(id);
+      return this.kick(id);
+    }).finally(() => {
+      this.olderChatPermits.delete(id);
+      if (this.queuedChat.get(id) === waiting) this.queuedChat.delete(id);
+      if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
+      release();
+    });
+    this.queuedChat.set(id, waiting);
+    return waiting;
   }
 
   async runLoop(userId) {
@@ -229,7 +254,7 @@ export class PrivateWorker {
   async performQzoneTurn(userId, prompt, trigger, qqToolContext = null) {
     let conversation = this.store.snapshot(userId);
     const options = optionsForConversation(conversation);
-    const scheduledSandbox = qqToolContext && this.codex?.supportsQqMcp
+    const scheduledSandbox = trigger === "speaker-greeting" ? "readOnly" : qqToolContext && this.codex?.supportsQqMcp
       ? options.permissionMode
       : "readOnly";
     let threadId = conversation.threadId;
@@ -255,7 +280,7 @@ export class PrivateWorker {
         this.onEvent({ type: "persona-error", targetType: "private", targetId: userId, error: error.message, at: new Date().toISOString() });
       }
     }
-    this.setLive(userId, { status: "running", threadId, trigger, text: "正在处理 QQ 空间任务…", startedAt: new Date().toISOString(), error: null });
+    this.setLive(userId, { status: "running", threadId, trigger, text: trigger === "speaker-greeting" ? "正在准备小爱问好…" : "正在处理 QQ 空间任务…", startedAt: new Date().toISOString(), error: null });
     try {
       const result = await this.codex.runTurn({
         groupId: this.codexKey(userId), threadId,
@@ -401,6 +426,7 @@ export class PrivateWorker {
       } : useMcpRead ? createLiveConversationTools({
         store: this.store, targetId: userId, targetType: "private", oneBot: this.oneBot,
         fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+        homeAssistant: this.homeAssistant,
         canRun: () => this.canRun(userId),
         trigger: work.trigger, triggerMessages: work.messages, security,
         initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),

@@ -8,6 +8,9 @@ export const TRIGGER_PRIORITY = Object.freeze({ scheduled: 1, followup: 3, messa
 export const REPLY_FOLLOWUP_MS = 120_000;
 const MESSAGE_WAKE_REASONS = new Set(["scheduled", "followup", "message_count", "mention", "poke"]);
 const LEGACY_EMPTY_REPLY_PLACEHOLDER = "这条消息暂时无法安全回复。";
+const HOME_ASSISTANT_ATTEMPT_TTL_MS = 30 * 60_000;
+const HOME_ASSISTANT_ATTEMPT_LIMIT = 256;
+const HOME_ASSISTANT_ACTION_KEY = /^[a-f0-9]{24,64}$/u;
 
 export function rateLimitResumeAt(error) {
   const match = String(error || "").match(/\b429\b[\s\S]*?(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+UTC\+8/u);
@@ -35,7 +38,7 @@ export class SessionStore {
       if (error.code !== "ENOENT") throw error;
     }
     if (loaded?.groups && typeof loaded.groups === "object") {
-      this.state = normalizeState(loaded, this.defaultCodexConfig);
+      this.state = normalizeState(loaded, this.defaultCodexConfig, this.clock().getTime());
     } else if (legacyContextPath) {
       await this.importLegacyThreads(legacyContextPath);
     }
@@ -485,6 +488,21 @@ export class SessionStore {
     return processed;
   }
 
+  /** Claim before a physical effect; unlike display receipts, this survives turn completion. */
+  async claimHomeActionAttempt(groupId, key) {
+    if (typeof key !== "string" || !HOME_ASSISTANT_ACTION_KEY.test(key)) throw new Error("家居操作登记键无效，未发送指令。");
+    const group = this.ensureGroup(groupId);
+    group.homeAssistantAttempts = normalizeHomeAssistantAttempts(group.homeAssistantAttempts, this.clock().getTime());
+    if (group.homeAssistantAttempts.some((entry) => entry.key === key)) throw new Error("相同家居请求此前已经尝试，不能重复执行；请查询状态或重新明确请求。");
+    if (group.homeAssistantAttempts.length >= HOME_ASSISTANT_ATTEMPT_LIMIT) throw new Error("近期家居操作登记已满，未发送指令；请稍后再试。");
+    const entry = { key, at: this.nowIso() };
+    // Synchronous reservation closes parallel-tool races. Keep it even if save
+    // fails: without a durable claim the caller must not perform the effect.
+    group.homeAssistantAttempts.push(entry);
+    await this.save();
+    return structuredClone(entry);
+  }
+
   async recordLiveActionSent(groupId, { kind, summary = "", observedSequence = 0, chatReply = true, messageId = null } = {}) {
     const group = this.ensureGroup(groupId);
     if (!group.busy || group.processing?.kind !== "agent") throw new Error("No live Agent conversation is active");
@@ -881,6 +899,7 @@ function createGroupState(groupId, defaultCodexConfig = null) {
     pendingMessages: [],
     recalledMessageIds: [],
     sentMessages: [],
+    homeAssistantAttempts: [],
     busy: false,
     pendingTrigger: null,
     processing: null,
@@ -897,7 +916,7 @@ function createGroupState(groupId, defaultCodexConfig = null) {
   };
 }
 
-function normalizeState(value, defaultCodexConfig = null) {
+function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
   const output = {
     version: 4,
     updatedAt: value.updatedAt || null,
@@ -920,6 +939,7 @@ function normalizeState(value, defaultCodexConfig = null) {
     group.pendingMessages = Array.isArray(raw.pendingMessages) ? raw.pendingMessages : [];
     group.recalledMessageIds = Array.isArray(raw.recalledMessageIds) ? raw.recalledMessageIds.map(String).slice(-512) : [];
     group.sentMessages = Array.isArray(raw.sentMessages) ? raw.sentMessages.filter((item) => /^-?\d+$/u.test(String(item?.messageId || ""))).slice(-50) : [];
+    group.homeAssistantAttempts = normalizeHomeAssistantAttempts(raw.homeAssistantAttempts, nowMs);
     group.recentTurns = Array.isArray(raw.recentTurns) ? raw.recentTurns.slice(-50) : [];
     group.failedDelivery = raw.failedDelivery ? normalizeDelivery(raw.failedDelivery) : null;
     group.liveSession = raw.liveSession && typeof raw.liveSession === "object" ? {
@@ -956,11 +976,29 @@ function normalizeState(value, defaultCodexConfig = null) {
   return output;
 }
 
+function normalizeHomeAssistantAttempts(value, nowMs) {
+  const entries = new Map();
+  for (const entry of Array.isArray(value) ? value : []) {
+    const at = Date.parse(entry?.at);
+    if (typeof entry?.key !== "string" || !HOME_ASSISTANT_ACTION_KEY.test(entry.key)
+      || !Number.isFinite(at) || at <= nowMs - HOME_ASSISTANT_ATTEMPT_TTL_MS) continue;
+    // Do not trim unexpired claims to a capacity limit: that would permit replay.
+    const previous = entries.get(entry.key);
+    if (!previous || at > Date.parse(previous.at)) entries.set(entry.key, { key: entry.key, at: new Date(at).toISOString() });
+  }
+  return [...entries.values()];
+}
+
 function normalizeCodexConfig(value, fallback = null) {
   const source = value && typeof value === "object" ? value : {};
   const defaults = fallback && typeof fallback === "object" ? fallback : {};
   const rawLimit = source.contextTokenLimit ?? defaults.contextTokenLimit ?? null;
   const configuredLimit = Number(rawLimit ?? 0);
+  const greetingSlots = ["morning", "noon", "night"];
+  const rawGreetings = Object.hasOwn(source, "speakerGreetings") ? source.speakerGreetings : defaults.speakerGreetings;
+  const greetingsValid = rawGreetings && typeof rawGreetings === "object" && !Array.isArray(rawGreetings)
+    && Object.keys(rawGreetings).length === greetingSlots.length
+    && greetingSlots.every((slot) => typeof rawGreetings[slot] === "boolean");
   return {
     model: String(source.model || defaults.model || "").trim() || null,
     reasoningEffort: String(source.reasoningEffort || defaults.reasoningEffort || "").trim() || null,
@@ -971,7 +1009,11 @@ function normalizeCodexConfig(value, fallback = null) {
     permissionMode: ["readOnly", "workspaceWrite", "dangerFullAccess"].includes(String(source.permissionMode || defaults.permissionMode || "workspaceWrite"))
       ? String(source.permissionMode || defaults.permissionMode || "workspaceWrite")
       : "workspaceWrite",
-    calendarRemindersEnabled: source.calendarRemindersEnabled ?? defaults.calendarRemindersEnabled ?? true
+    calendarRemindersEnabled: source.calendarRemindersEnabled ?? defaults.calendarRemindersEnabled ?? true,
+    homeAssistantPermission: ["disabled", "owner", "group"].includes(source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
+      ? (source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
+      : "disabled",
+    speakerGreetings: Object.fromEntries(greetingSlots.map((slot) => [slot, greetingsValid ? rawGreetings[slot] : false]))
   };
 }
 
