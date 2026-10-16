@@ -24,4 +24,5 @@ jobs:
       - run: npm test
       - run: pip install -r modules/workbuddy-agent/requirements.txt
       - run: python test/workbuddy-bridge-recovery.test.py
+      - run: python test/workbuddy-image-preview.test.py
       - run: npm run audit:public

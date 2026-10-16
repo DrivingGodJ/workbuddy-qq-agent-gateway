@@ -43,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import uuid
 from typing import Any, Dict, Optional
@@ -67,14 +68,15 @@ CONTROL_TIMEOUT_MS = 10_000
 INIT_RETRY_ATTEMPTS = 6
 # WorkBuddy 会把视觉输入以内嵌 Base64 JSON 发给模型服务。Base64 会额外膨胀约
 # 1/3；如果一次积压了很多普通图片，未约束的请求会在到达模型前触发
-# `Request body larger than maxBodyLength limit`。这里把原始图片字节控制在 4 MiB
+# `Request body larger than maxBodyLength limit`。这里把原始图片字节控制在 2 MiB
 # 内，必要时只生成本轮临时 JPEG 预览，不修改或删除 QQ 缓存原图。
-MAX_PROMPT_IMAGE_RAW_BYTES = 4 * 1024 * 1024
+MAX_PROMPT_IMAGE_RAW_BYTES = 2 * 1024 * 1024
 MAX_PROMPT_IMAGE_COUNT = 48
 MIN_PROMPT_IMAGE_BYTES = 64 * 1024
 SIPS_PATH = "/usr/bin/sips"
+MAX_IMAGE_PREPARATION_SECONDS = 40.0
 IMAGE_REDUCTION_ATTEMPTS = [
-    (1600, 72),
+    (1280, 72),
     (1280, 65),
     (1024, 58),
     (768, 50),
@@ -287,6 +289,7 @@ class Turn:
         self.group_id = group_id
         self.text = ""
         self.cancelled = False
+        self.tool_attempts: set[str] = set()
         self.done = asyncio.Event()
         self.task: Optional[asyncio.Task] = None
 
@@ -708,6 +711,19 @@ class Bridge:
             })
             return {"continue_": True, "suppressOutput": True}
 
+        async def pre_tool_hook(input_data: Dict[str, Any], _tool_use_id: Optional[str], _context: Dict[str, Any]):
+            turn = next((item for item in self.turns.values()
+                         if item.thread_id == session.thread_id and not item.cancelled), None)
+            if turn is None:
+                return {"continue_": False, "stopReason": "本轮已停止，不能再调用工具"}
+            name = str(input_data.get("tool_name") or "unknown")
+            if name == "DeferExecuteTool":
+                name = str((input_data.get("tool_input") or {}).get("toolName") or name)
+            turn.tool_attempts.add(name)
+            emit({"jsonrpc": "2.0", "method": "turn/toolAttempt", "params": {
+                "threadId": turn.thread_id, "turnId": turn.turn_id, "name": name}})
+            return {"continue_": True}
+
         self._ensure_resume_history(session.cwd, resume)
         extra_args = session_extra_args(session)
         mcp_endpoint = os.environ.get("CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT", "")
@@ -746,6 +762,7 @@ class Bridge:
             system_prompt=AppendSystemPrompt(append="\n\n".join(system_parts))
             if system_parts else None,
             hooks={
+                "PreToolUse": [HookMatcher(hooks=[pre_tool_hook], timeout=5.0)],
                 "PreCompact": [HookMatcher(hooks=[pre_compact_hook], timeout=5.0)],
                 "PostCompact": [HookMatcher(hooks=[post_compact_hook], timeout=5.0)]
             },
@@ -951,7 +968,7 @@ class Bridge:
         self.active_by_group[group_id] = turn
         log(f"turn/start turn={turn_id} group={group_id} thread={thread_id}")
         turn.task = asyncio.create_task(self._run_turn(turn, session, params))
-        return {"turn": {"id": turn_id}}
+        return {"turn": {"id": turn_id, "toolTracking": True}}
 
     async def _run_turn(
         self, turn: Turn, session: Session, params: Dict[str, Any]
@@ -1034,6 +1051,9 @@ class Bridge:
                         except Exception as exc:
                             log(f"set_permission_mode 失败（忽略）: {exc}")
 
+                    if image_paths:
+                        emit({"jsonrpc": "2.0", "method": "turn/progress", "params": {
+                            "threadId": turn.thread_id, "turnId": turn.turn_id, "stage": "preparing_images"}})
                     client = await self._send_prompt_resilient(
                         session, client, prompt, image_paths
                     )
@@ -1229,7 +1249,9 @@ class Bridge:
         for attempt in range(1, INIT_RETRY_ATTEMPTS + 1):
             try:
                 # 每次重试都要重新构造 payload：带图时它是异步生成器，只能被迭代一次。
-                await client.query(self._prompt_payload(prompt, image_paths))
+                # Native image conversion must not block interrupt/control RPCs.
+                payload = await asyncio.to_thread(self._prompt_payload, prompt, image_paths)
+                await client.query(payload)
                 if attempt > 1:
                     log(f"initialize 第 {attempt} 次接住")
                 return
@@ -1271,9 +1293,13 @@ class Bridge:
         optimized_count = 0
         attached_count = 0
         used_bytes = 0
+        deadline = time.monotonic() + MAX_IMAGE_PREPARATION_SECONDS
         with tempfile.TemporaryDirectory(prefix="codexremotecontact-agent-images-") as temp_dir:
             for index, path in enumerate(existing_paths):
                 remaining_count = len(existing_paths) - index
+                if time.monotonic() >= deadline:
+                    omitted_count += remaining_count
+                    break
                 remaining_bytes = MAX_PROMPT_IMAGE_RAW_BYTES - used_bytes
                 if remaining_bytes < MIN_PROMPT_IMAGE_BYTES:
                     omitted_count += remaining_count
@@ -1282,7 +1308,7 @@ class Bridge:
                     MIN_PROMPT_IMAGE_BYTES,
                     remaining_bytes // max(1, remaining_count),
                 )
-                prepared = cls._prepare_prompt_image(path, target_bytes, temp_dir, index)
+                prepared = cls._prepare_prompt_image(path, target_bytes, temp_dir, index, deadline)
                 if prepared is None:
                     omitted_count += 1
                     continue
@@ -1323,13 +1349,22 @@ class Bridge:
 
     @staticmethod
     def _prepare_prompt_image(
-        path: str, target_bytes: int, temp_dir: str, index: int
+        path: str, target_bytes: int, temp_dir: str, index: int, deadline: Optional[float] = None
     ) -> Optional[tuple[bytes, str, bool]]:
+        deadline = deadline if deadline is not None else time.monotonic() + MAX_IMAGE_PREPARATION_SECONDS
         try:
             size = os.path.getsize(path)
-            if 0 < size <= target_bytes:
-                with open(path, "rb") as fh:
-                    return fh.read(), mimetypes.guess_type(path)[0] or "image/png", False
+            media_type = mimetypes.guess_type(path)[0]
+            # Small GIF/WebP files can still expand dramatically inside the SDK.
+            # Only already-small, bounded-dimension JPEG/PNG bypass conversion.
+            if 0 < size <= target_bytes and media_type in ("image/jpeg", "image/png") and os.path.isfile(SIPS_PATH):
+                dimensions = subprocess.run([SIPS_PATH, "-g", "pixelWidth", "-g", "pixelHeight", path],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+                    timeout=max(0.1, min(5.0, deadline - time.monotonic())))
+                values = re.findall(rb"pixel(?:Width|Height):\s*(\d+)", dimensions.stdout)
+                if dimensions.returncode == 0 and len(values) == 2 and all(0 < int(v) <= 1280 for v in values):
+                    with open(path, "rb") as fh:
+                        return fh.read(), media_type, False
         except Exception as exc:
             log(f"图片读取失败，跳过 {path}: {exc}")
             return None
@@ -1339,6 +1374,9 @@ class Bridge:
             return None
 
         for attempt, (max_dimension, quality) in enumerate(IMAGE_REDUCTION_ATTEMPTS):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             output_path = os.path.join(temp_dir, f"image-{index}-{attempt}.jpg")
             try:
                 completed = subprocess.run(
@@ -1353,7 +1391,7 @@ class Bridge:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     check=False,
-                    timeout=30,
+                    timeout=min(8.0, remaining),
                 )
                 if completed.returncode != 0 or not os.path.isfile(output_path):
                     continue
@@ -1424,11 +1462,11 @@ class Bridge:
                 turn.done.wait(),
                 timeout=self.interrupt_grace_seconds,
             )
-            return {"ok": True, "forced": False}
+            return {"ok": True, "forced": False, "toolAttempts": sorted(turn.tool_attempts)}
         except asyncio.TimeoutError:
             log(f"turn 中断后未正常结束，强制回收 turn={turn.turn_id} group={turn.group_id}")
             await self._force_cancel_turn(turn, session)
-            return {"ok": True, "forced": True}
+            return {"ok": True, "forced": True, "toolAttempts": sorted(turn.tool_attempts)}
 
     async def _force_cancel_turn(
         self,

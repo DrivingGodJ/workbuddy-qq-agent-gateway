@@ -64,6 +64,7 @@ export function createLiveConversationTools({
 }) {
   const context = {
     liveMode: true,
+    canRead: () => canRun() && !context.failed && !context.ended,
     targetType,
     allowMessage: true,
     allowFiles: targetType === "group" && Boolean(security.allowQqFiles),

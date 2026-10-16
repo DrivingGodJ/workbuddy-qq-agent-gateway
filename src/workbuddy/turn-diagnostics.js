@@ -25,7 +25,11 @@ export class TurnDiagnostics {
 
   progress(threadId, stage, toolName = null) {
     const entry = this.turns.get(threadId);
-    if (!entry || entry.finishedAtMs !== null) return;
+    if (!entry || entry.finishedAtMs !== null && stage !== "recovering") return;
+    if (stage === "recovering") {
+      entry.finishedAtMs = null;
+      entry.error = null;
+    }
     entry.stage = stage;
     entry.lastProgressAtMs = this.clock();
     entry.toolName = toolName;

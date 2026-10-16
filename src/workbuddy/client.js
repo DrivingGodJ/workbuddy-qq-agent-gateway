@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { setTimeout as pause } from "node:timers/promises";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -72,6 +73,18 @@ function normalizeModel(model) {
   return CODEX_MODEL_PATTERN.test(value) ? null : value;
 }
 
+// Unknown tools are deliberately not replay-safe, including Bash and subagents.
+const REPLAY_SAFE_TOOLS = new Set([
+  "Read", "Glob", "Grep", "WebFetch", "WebSearch", "ToolSearch",
+  ...["read_messages", "read_source_messages", "read_forward_messages", "read_link",
+    "list_reactions", "read_qzone_feeds", "get_group_management", "read_home_devices",
+    "wait_for_messages", "end_conversation"].map((name) => `mcp__qq_gateway__${name}`)
+]);
+
+function replaySafeTool(name) {
+  return REPLAY_SAFE_TOOLS.has(String(name));
+}
+
 export class WorkBuddyClient {
   constructor({
     python,
@@ -83,6 +96,7 @@ export class WorkBuddyClient {
     timeoutMs = 10 * 60 * 1000,
     idleTimeoutMs = 3 * 60 * 1000,
     compactionTimeoutMs = 6 * 60 * 1000,
+    recoveryDelayMs = 15_000,
     env = process.env,
     onTurnEvent = () => {},
   } = {}) {
@@ -98,6 +112,8 @@ export class WorkBuddyClient {
     this.timeoutMs = timeoutMs;
     this.idleTimeoutMs = idleTimeoutMs;
     this.compactionTimeoutMs = compactionTimeoutMs;
+    this.recoveryDelayMs = recoveryDelayMs;
+    this.recoveries = new Map();
     this.env = env;
     this.onTurnEvent = onTurnEvent;
     this.diagnostics = new TurnDiagnostics();
@@ -178,6 +194,11 @@ export class WorkBuddyClient {
         }
         const input = JSON.parse(body);
         const active = this.activeByThread.get(String(input.threadId || ""));
+        // Claim the risk before dispatch, even if the request later times out or
+        // its result is lost. A missing receipt must never mean "safe to replay".
+        if (active && !active.cancelRequested && !replaySafeTool(`mcp__qq_gateway__${input.name}`)) {
+          active.sideEffectsPossible = true;
+        }
         let result;
         if (!active || active.cancelRequested) {
           result = { isError: true, content: [{ type: "text", text: "当前 WorkBuddy 会话没有可用的 QQ 轮次。" }] };
@@ -201,9 +222,15 @@ export class WorkBuddyClient {
           const queuedMessage = active.mcpActions.find((action) => action.kind === "message");
           if (queuedMessage) active.onDelta?.(queuedMessage.text, queuedMessage.text);
         }
-        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
+        if (active && !active.cancelRequested) {
+          this.reportProgress(active, "waiting_model");
+          this.touchTurn(active);
+        }
+        const payload = JSON.stringify(result);
+        if (!response.destroyed && !response.writableEnded) response.writeHead(200, { "content-type": "application/json" }).end(payload);
       } catch (error) {
-        response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({
+        if (response.headersSent && !response.writableEnded) response.destroy();
+        if (!response.destroyed && !response.writableEnded && !response.headersSent) response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({
           isError: true, content: [{ type: "text", text: String(error.message || error) }]
         }));
       }
@@ -324,12 +351,46 @@ export class WorkBuddyClient {
     return threadId;
   }
 
-  async runTurn({
+  async runTurn(request) {
+    if (this.recoveries.has(String(request.threadId))
+      || [...this.recoveries.values()].some((item) => item.groupId === String(request.groupId))) {
+      throw new Error("WorkBuddy target already has a queued recovery");
+    }
+    try {
+      return await this.runSingleTurn(request);
+    } catch (error) {
+      // One continuation inside the original queued job, never a new session or
+      // a concurrent writer. All side-effecting/uncertain turns fail closed.
+      const context = request.qqToolContext;
+      if (!context || error.code !== "WORKBUDDY_IDLE_TIMEOUT" || !error.safeToRetry
+        || context.failed || context.ended || context.canRead?.() === false) throw error;
+      const key = String(request.threadId);
+      const recovery = { groupId: String(request.groupId), controller: new AbortController() };
+      this.recoveries.set(key, recovery);
+      this.diagnostics.progress(key, "recovering");
+      this.onTurnEvent({ type: "agent-recovering", groupId: recovery.groupId, threadId: key, at: new Date().toISOString() });
+      try {
+        await pause(this.recoveryDelayMs, undefined, { signal: recovery.controller.signal });
+        if (context.canRead?.() === false || context.failed || context.ended) throw new WorkBuddyTurnCancelledError();
+        return await this.runSingleTurn({ ...request, refreshClientBeforeTurn: true,
+          recoverySignal: recovery.controller.signal });
+      } catch (nextError) {
+        if (recovery.controller.signal.aborted) throw new WorkBuddyTurnCancelledError();
+        throw nextError;
+      } finally {
+        if (this.recoveries.get(key) === recovery) this.recoveries.delete(key);
+      }
+    }
+  }
+
+  async runSingleTurn({
     groupId, threadId, prompt, imagePaths = [], turnSandbox = { type: "readOnly" },
     model = this.model, effort = this.effort, contextTokenLimit = "auto",
     cwd = null, outputSchema = null, qqToolContext = null, onDelta = null,
     prefetchQqMessages = true, refreshClientBeforeTurn = false, turnTimeoutMs = this.timeoutMs,
+    recoverySignal = null,
   }) {
+    if (recoverySignal?.aborted) throw new WorkBuddyTurnCancelledError();
     await this.ensureProcess();
     if (this.activeByThread.has(String(threadId))) {
       throw new Error(`WorkBuddy thread ${threadId} already has a running turn`);
@@ -341,6 +402,7 @@ export class WorkBuddyClient {
     // calls the same scoped reader and advances exactly the same read cutoff;
     // delivery, cleanup and subsequent autonomous MCP reads stay unchanged.
     if (prefetchQqMessages) prompt = await prepareLiveConversationPrompt(qqToolContext, prompt);
+    if (recoverySignal?.aborted) throw new WorkBuddyTurnCancelledError();
     this.diagnostics.start(String(threadId), { prompt, model, groupId: String(groupId), imagePaths });
     this.onTurnEvent({ type: "agent-input", threadId: String(threadId), groupId: String(groupId) });
     const response = await this.request("turn/start", {
@@ -370,6 +432,10 @@ export class WorkBuddyClient {
       this.onTurnEvent({ type: "agent-finished", groupId: String(groupId), threadId: String(threadId) });
       throw error;
     }
+    if (recoverySignal?.aborted) {
+      await this.request("turn/interrupt", { threadId, turnId }, 30_000);
+      throw new WorkBuddyTurnCancelledError();
+    }
 
     return new Promise((resolve, reject) => {
       const active = {
@@ -391,6 +457,8 @@ export class WorkBuddyClient {
         silenceLimitMs: Math.max(1, Number(turnTimeoutMs) || this.timeoutMs),
         progressTimeout: null,
         timeoutInProgress: false,
+        toolTracking: response.turn.toolTracking === true,
+        sideEffectsPossible: false,
       };
       this.activeByThread.set(active.threadId, active);
       this.activeByTurn.set(active.turnId, active);
@@ -432,10 +500,13 @@ export class WorkBuddyClient {
     clearTimeout(active.progressTimeout);
     clearTimeout(active.timeout);
     active.cancelRequested = true;
+    let released = false;
     try {
       // The bridge releases its target lock before acknowledging interrupt.
       // Do not free the local writer first or an immediate retry collides with it.
-      await this.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId }, 30_000);
+      const result = await this.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId }, 30_000);
+      released = result?.ok === true && Array.isArray(result.toolAttempts);
+      if (result?.toolAttempts?.some((name) => !replaySafeTool(name))) active.sideEffectsPossible = true;
     } catch {
       // If the bridge cannot confirm cleanup, retire it before allowing another
       // turn. Every target's pending messages and confirmed sends remain durable.
@@ -453,12 +524,19 @@ export class WorkBuddyClient {
         });
       }
     }
-    this.finishTurn(active, new Error(reason));
+    const error = new Error(reason);
+    error.code = active.compacting ? "WORKBUDDY_COMPACTION_TIMEOUT" : "WORKBUDDY_IDLE_TIMEOUT";
+    error.safeToRetry = released && active.toolTracking && !active.sideEffectsPossible
+      && !active.qqToolContext?.failed && !active.qqToolContext?.ended
+      && !active.qqToolContext?.actionCount && !active.mcpActions?.length;
+    this.finishTurn(active, error);
   }
 
   async interruptGroup(groupId) {
+    const recovery = [...this.recoveries.values()].find((item) => item.groupId === String(groupId));
+    recovery?.controller.abort();
     const active = this.activeByGroup.get(String(groupId));
-    if (!active) return false;
+    if (!active) return Boolean(recovery);
     active.cancelRequested = true;
     clearTimeout(active.timeout);
     clearTimeout(active.progressTimeout);
@@ -481,7 +559,7 @@ export class WorkBuddyClient {
   }
 
   activeGroups() {
-    return [...this.activeByGroup.keys()];
+    return [...new Set([...this.activeByGroup.keys(), ...[...this.recoveries.values()].map((item) => item.groupId)])];
   }
 
   async listModels() {
@@ -500,7 +578,7 @@ export class WorkBuddyClient {
     await this.ensureProcess();
     const id = String(threadId || "");
     if (!id) throw new Error("WorkBuddy thread id is required");
-    if (this.activeByThread.has(id)) throw new Error(`WorkBuddy thread ${id} still has a running turn`);
+    if (this.activeByThread.has(id) || this.recoveries.has(id)) throw new Error(`WorkBuddy thread ${id} still has a running turn`);
     return this.request("thread/delete", {
       threadId: id,
       purgeProject: Boolean(purgeProject),
@@ -511,6 +589,7 @@ export class WorkBuddyClient {
   }
 
   async close() {
+    for (const recovery of this.recoveries.values()) recovery.controller.abort();
     for (const active of this.activeByTurn.values()) {
       this.finishTurn(active, new Error("WorkBuddy client is shutting down"));
     }
@@ -629,6 +708,19 @@ export class WorkBuddyClient {
       return;
     }
 
+    if (message.method === "turn/toolAttempt") {
+      const params = message.params || {};
+      const active = this.activeByTurn.get(String(params.turnId || ""));
+      if (active && String(params.threadId || "") === active.threadId) {
+        if (!replaySafeTool(params.name)) active.sideEffectsPossible = true;
+        if (!active.cancelRequested) {
+          this.reportProgress(active, "tool", String(params.name || "Agent 工具"));
+          this.touchTurn(active);
+        }
+      }
+      return;
+    }
+
     if (message.method === "turn/usage") {
       const params = message.params || {};
       const active = this.activeByTurn.get(String(params.turnId || ""));
@@ -644,6 +736,9 @@ export class WorkBuddyClient {
       const turnId = String(params.turn?.id || "");
       const active = this.activeByTurn.get(turnId);
       if (!active || String(params.threadId || "") !== active.threadId) return;
+      // Interrupt acknowledgement, not a late completed event, owns timeout
+      // cleanup and decides whether a replay is safe.
+      if (active.timeoutInProgress) return;
       if (active.cancelRequested || params.turn?.status === "interrupted") {
         this.finishTurn(active, active.timeoutReason ? new Error(active.timeoutReason) : new WorkBuddyTurnCancelledError());
         return;
