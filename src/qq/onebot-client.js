@@ -266,6 +266,16 @@ export class OneBotClient {
     };
   }
 
+  async deleteCustomFace(emojiId) {
+    const id = String(emojiId || "").trim();
+    if (!id) throw new Error("无效的 QQ 收藏表情 ID");
+    const result = await this.request("/delete_custom_face", { emoji_id: id }, { timeoutMs: 15_000 });
+    if (result.body?.status !== "ok" || result.body?.retcode == null || Number(result.body.retcode) !== 0) {
+      throw new Error(result.body?.wording || result.body?.message || "QQ 收藏表情删除结果不确定");
+    }
+    return { ok: true };
+  }
+
   async modifyCustomFace(emojiId, description) {
     const result = await this.request("/modify_custom_face", {
       emoji_id: String(emojiId),

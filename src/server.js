@@ -525,6 +525,12 @@ async function handleApi(req, res, url) {
     res.end(body);
     return;
   }
+  if (req.method === "POST" && url.pathname === "/api/qq/stickers/blacklist/clean-files") {
+    const result = await stickerManager.cleanExcludedFiles();
+    recordEvent({ type: "sticker-blacklist-files-cleaned", ...result, at: new Date().toISOString() });
+    sendJson(res, 200, { result, stickers: stickerManager.publicState() });
+    return;
+  }
   const stickerAction = url.pathname.match(/^\/api\/qq\/stickers\/(st_[a-f0-9]{12,64})\/(update|delete|blacklist|restore|forget)$/i);
   if (req.method === "POST" && stickerAction) {
     const [, id, requestedAction] = stickerAction;

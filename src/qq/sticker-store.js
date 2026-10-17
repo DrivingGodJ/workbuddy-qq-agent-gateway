@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { isUsableStickerDescription } from "./sticker-label.js";
 
@@ -75,7 +75,7 @@ export class QqStickerStore {
       if (marketEmojiId) excluded.marketEmojiIds = [...new Set([...excluded.marketEmojiIds, marketEmojiId])];
       // Older fingerprint-only records had no preview. Keep a library copy on
       // the next arrival without labeling it or touching the message original.
-      if (!excluded.archivedSticker?.localPath) {
+      if (!excluded.filesCleanedAt && !excluded.archivedSticker?.localPath) {
         const localPath = join(this.libraryDir, "blacklist", `${excluded.id}${safeExtension(image.localPath, image.mimeType)}`);
         await writeFile(localPath, bytes, { mode: 0o600 });
         excluded.archivedSticker = normalizeEntry(excluded.id, {
@@ -433,6 +433,48 @@ export class QqStickerStore {
 
   cleanupPrunedFiles() { return this.enqueue(() => this.flushPrunedFiles()); }
 
+  cleanExcludedFiles() {
+    return this.enqueue(async () => {
+      const entries = Object.values(this.state.excluded);
+      const paths = [...new Set(entries.map((entry) => entry.archivedSticker?.localPath).filter(Boolean).map((path) => resolve(path)))];
+      const protectedPaths = new Set();
+      for (const entry of [...Object.values(this.state.stickers), ...Object.values(this.state.candidates)]) {
+        protectedPaths.add(resolve(entry.localPath));
+        try { protectedPaths.add(await realpath(entry.localPath)); }
+        catch (error) { if (error.code !== "ENOENT") throw error; }
+      }
+      const sizes = new Map();
+      // Preflight the whole batch before changing records or removing any file.
+      for (const path of paths) {
+        const info = await this.inspectManagedFile(path);
+        if (protectedPaths.has(path) || (info && protectedPaths.has(await realpath(path)))) {
+          throw new Error("黑名单文件仍被可用表情或识别任务引用，未清理");
+        }
+        if (info) sizes.set(path, info.size);
+      }
+      const previous = this.state;
+      const excluded = Object.fromEntries(entries.map((entry) => {
+        const { archivedSticker, ...record } = entry;
+        return [entry.id, { ...record, usage: entry.usage || archivedSticker?.usage || "",
+          filesCleanedAt: entry.filesCleanedAt || this.nowIso() }];
+      }));
+      this.state = { ...previous, excluded,
+        garbagePaths: [...new Set([...(previous.garbagePaths || []), ...paths])] };
+      try { await this.save(); } catch (error) { this.state = previous; throw error; }
+      // Persist the no-recapture marker and retry paths before physical removal.
+      await this.flushPrunedFiles();
+      let cleanedCount = 0, freedBytes = 0;
+      for (const [path, size] of sizes) {
+        try { await lstat(path); }
+        catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          cleanedCount++; freedBytes += size;
+        }
+      }
+      return { cleanedCount, freedBytes, pendingFiles: this.state.garbagePaths.length };
+    });
+  }
+
   async flushPrunedFiles() {
     const livePaths = new Set([...Object.values(this.state.stickers), ...Object.values(this.state.candidates),
       ...Object.values(this.state.excluded).map((entry) => entry.archivedSticker).filter(Boolean)]
@@ -506,7 +548,15 @@ export class QqStickerStore {
       const restored = { ...normalizeEntry(entry.id, archive), labelStatus: "ready",
         sha256s: entry.sha256s, md5s: entry.md5s, marketEmojiIds: entry.marketEmojiIds,
         receiveCount: (archive.receiveCount || 1) + entry.receiveCount,
-        lastSeenAt: entry.lastSeenAt || archive.lastSeenAt };
+        lastSeenAt: entry.lastSeenAt || archive.lastSeenAt,
+        favoriteStatus: "pending", favoriteEmojiId: null, favoriteError: null };
+      // QQ favorites may have been deleted independently of this local archive.
+      // Re-read by digest or upload the intact local file; never reuse a stale ID.
+      try { await this.ensureFavorite(restored, { forceRefresh: true }); }
+      catch (error) {
+        restored.favoriteStatus = "failed";
+        restored.favoriteError = String(error?.message || error).slice(0, 500);
+      }
       this.state = { ...previous,
         excluded: Object.fromEntries(Object.entries(previous.excluded).filter(([key]) => key !== entry.id)),
         stickers: { ...previous.stickers, [entry.id]: restored }
@@ -556,7 +606,8 @@ export class QqStickerStore {
       excludedItems: Object.values(this.state.excluded).map((entry) => ({
         id: entry.id, reason: entry.reason, excludedAt: entry.excludedAt,
         lastSeenAt: entry.lastSeenAt, receiveCount: entry.receiveCount,
-        usage: entry.archivedSticker?.usage || "",
+        usage: entry.usage || entry.archivedSticker?.usage || "",
+        filesCleanedAt: entry.filesCleanedAt || null,
         hasPreview: Boolean(entry.archivedSticker?.localPath),
         canRestore: Boolean(entry.archivedSticker?.localPath && entry.archivedSticker.labelStatus === "ready"
           && isUsableStickerDescription(entry.archivedSticker.usage))
@@ -668,12 +719,25 @@ export class QqStickerStore {
     });
   }
 
-  async removeManagedFile(path, { pendingOnly = false } = {}) {
+  async inspectManagedFile(path, { pendingOnly = false } = {}) {
     const managedRoot = pendingOnly ? resolve(this.libraryDir, "pending") : this.libraryDir;
     const managedPath = resolve(String(path || ""));
     if (managedPath === managedRoot || !managedPath.startsWith(`${managedRoot}${sep}`)) {
       throw new Error(`Refusing to delete sticker outside managed directory: ${managedPath}`);
     }
+    let info;
+    try { info = await lstat(managedPath); }
+    catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    const root = await realpath(managedRoot), parent = await realpath(dirname(managedPath));
+    if (!info.isFile() || parent !== root && !parent.startsWith(`${root}${sep}`)) {
+      throw new Error("拒绝清理符号链接、目录或表情库外的文件");
+    }
+    return info;
+  }
+
+  async removeManagedFile(path, options = {}) {
+    if (!await this.inspectManagedFile(path, options)) return;
+    const managedPath = resolve(String(path));
     await rm(managedPath, { force: true });
   }
 
@@ -736,9 +800,11 @@ function normalizeState(value) {
       reason: raw.reason,
       excludedAt: raw.excludedAt || null,
       lastSeenAt: raw.lastSeenAt || null,
-      receiveCount: Math.max(0, Number(raw.receiveCount) || 0)
+      receiveCount: Math.max(0, Number(raw.receiveCount) || 0),
+      usage: normalizeUsage(raw.usage || raw.archivedSticker?.usage),
+      filesCleanedAt: typeof raw.filesCleanedAt === "string" && Number.isFinite(Date.parse(raw.filesCleanedAt)) ? raw.filesCleanedAt : null
     };
-    if (raw.archivedSticker?.localPath && raw.archivedSticker?.sha256) {
+    if (!entry.filesCleanedAt && raw.archivedSticker?.localPath && raw.archivedSticker?.sha256) {
       entry.archivedSticker = normalizeEntry(id, raw.archivedSticker);
     }
     if (entry.sha256s.length || entry.md5s.length || entry.marketEmojiIds.length) excluded[id] = entry;

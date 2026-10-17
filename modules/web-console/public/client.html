@@ -342,6 +342,10 @@
             <button id="stickerBlacklistButton" class="button ghost" type="button" aria-pressed="false">黑名单 <span id="stickerBlacklistCount" class="button-count">0</span></button>
           </div>
           <p id="stickerLibraryHelp" class="gallery-subtitle gallery-library-help"></p>
+          <div id="stickerBlacklistTools" class="gallery-blacklist-tools" hidden>
+            <button id="cleanStickerBlacklistFilesButton" class="button danger" type="button" aria-describedby="stickerBlacklistCleanupHelp">清理黑名单本地文件</button>
+            <span id="stickerBlacklistCleanupHelp" class="field-note">保留黑名单和备注；清理后须先解除黑名单，再等下次收到才能恢复。</span>
+          </div>
           <div id="stickerGalleryGrid" class="sticker-grid" aria-live="polite"></div>
         </div>
       </section>

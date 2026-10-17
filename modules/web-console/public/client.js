@@ -3,7 +3,7 @@ const HUB = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:3789";
 const els = Object.fromEntries([
   "deleteTargetButton", "deleteTargetHint", "deleteTargetDialog", "deleteTargetForm", "deleteTargetName", "deleteTargetStatus", "cancelDeleteTargetButton", "confirmDeleteTargetButton",
   "toggleNavigationButton", "globalSettingsButton", "settingsButton", "settingsDrawer", "closeSettingsButton", "settingsTargetName", "conversationSettingsBody", "globalSettingsBody", "diagnosticsDetails", "usageSummary", "turnInputPreview", "refreshInputButton", "conversationSearch",
-  "stickerLibraryButton", "stickerBlacklistButton", "stickerLibraryCount", "stickerBlacklistCount", "stickerLibraryHelp",
+  "stickerLibraryButton", "stickerBlacklistButton", "stickerLibraryCount", "stickerBlacklistCount", "stickerLibraryHelp", "stickerBlacklistTools", "cleanStickerBlacklistFilesButton",
   "connectionBadge", "refreshButton", "agentDispatchToggle", "agentDispatchLabel", "qzoneButton", "stickerGalleryButton", "stickerGalleryButtonCount",
   "workspace", "qzonePanel", "closeQzoneButton", "qzoneBanner", "qzoneForm", "qzoneTarget", "qzoneAutoPost", "qzonePostTimes", "qzoneAutoEngage", "qzoneLastSeenTime", "saveQzoneButton", "qzoneSaveStatus", "qzoneEvents", "stickerGallery", "closeStickerGalleryButton", "stickerReadyCount", "stickerRecognizingCount", "stickerCommitCount", "stickerGalleryModel", "stickerRecognitionStatus", "stickerGalleryActionStatus", "stickerGalleryGrid",
   "groupCount", "agentGroupCount", "sourceCount", "groupList", "privateList", "sourceList",
@@ -155,8 +155,12 @@ function renderStickerGallery() {
   els.stickerBlacklistButton.setAttribute("aria-pressed", String(blacklist));
   els.stickerLibraryButton.classList.toggle("selected", !blacklist);
   els.stickerBlacklistButton.classList.toggle("selected", blacklist);
+  els.stickerBlacklistTools.hidden = !blacklist;
+  els.cleanStickerBlacklistFilesButton.disabled = Boolean(stickerActionSavingId) || !Number(stickers.excludedCount || 0);
+  els.cleanStickerBlacklistFilesButton.setAttribute("aria-busy", String(stickerActionSavingId === "clean-blacklist-files"));
+  els.cleanStickerBlacklistFilesButton.textContent = stickerActionSavingId === "clean-blacklist-files" ? "正在清理本地文件…" : "清理黑名单本地文件";
   els.stickerLibraryHelp.textContent = blacklist
-    ? `黑名单中的表情不再识别、入库或供${agentName()}发送。移出可恢复收录；彻底删除会忘记所有指纹，下次收到按新表情处理。旧记录可能没有预览。`
+    ? `黑名单中的表情不再识别、入库或供${agentName()}发送。清理本地文件不会解除黑名单；清理后须先解除，再等下次收到恢复收录。彻底删除则忘记指纹，下次按新表情处理。`
     : "移入黑名单会保留预览和备注，阻止再次收录；彻底删除则忘记该表情，下次收到重新识别。";
   const awaitingAi = Number(stickers.awaitingAi || 0);
   const awaitingCommit = Number(stickers.awaitingCommit || 0);
@@ -212,7 +216,7 @@ function renderStickerCard(item, candidate, blacklisted = false) {
     ? `收到 ${Number(item.receiveCount || 0)} 次`
     : `收到 ${Number(item.receiveCount || 0)} 次 · 发送 ${Number(item.sendCount || 0)} 次`;
   const editing = !candidate && stickerEditingId === item.id;
-  const saving = stickerActionSavingId === item.id;
+  const saving = Boolean(stickerActionSavingId);
   const actions = blacklisted
     ? `<div class="sticker-card-actions"><button class="button ghost" type="button" data-restore-sticker="${escapeHtml(item.id)}" ${saving ? "disabled" : ""}>${item.canRestore ? "恢复到表情库" : "解除黑名单"}</button><button class="button danger" type="button" data-forget-sticker="${escapeHtml(item.id)}" ${saving ? "disabled" : ""}>彻底删除并忘记</button></div>`
     : candidate ? "" : editing
@@ -224,7 +228,7 @@ function renderStickerCard(item, candidate, blacklisted = false) {
       </form>`
     : `<div class="sticker-card-actions"><button class="button ghost" type="button" data-edit-sticker="${escapeHtml(item.id)}" ${saving ? "disabled" : ""}>修改备注</button><button class="button ghost" type="button" data-delete-sticker="${escapeHtml(item.id)}" ${saving ? "disabled" : ""}>移入黑名单</button><button class="button danger" type="button" data-forget-sticker="${escapeHtml(item.id)}" ${saving ? "disabled" : ""}>彻底删除并忘记</button></div>`;
   return `<article class="sticker-card ${candidate ? "candidate" : ""}" data-sticker-id="${escapeHtml(item.id)}">
-    <div class="sticker-preview">${blacklisted && !item.hasPreview ? '<span class="sticker-preview-placeholder">旧记录暂无预览<br>再次收到时会补回预览，不触发识别</span>' : `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(description || "待识别表情")}" loading="${candidate ? "eager" : "lazy"}" />`}</div>
+    <div class="sticker-preview">${blacklisted && !item.hasPreview ? `<span class="sticker-preview-placeholder">${item.filesCleanedAt ? "本地文件已清理<br>仍在黑名单中；解除后等下次收到恢复" : "旧记录暂无预览<br>仍保留黑名单和备注"}</span>` : `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(description || "待识别表情")}" loading="${candidate ? "eager" : "lazy"}" />`}</div>
     <div class="sticker-card-body">
       <div class="sticker-card-meta"><span class="sticker-state ${status.tone}">${escapeHtml(status.label)}</span><time>${escapeHtml(formatTime(item.lastSeenAt || item.excludedAt || item.createdAt))}</time></div>
       <p>${escapeHtml(description || "等待识别…")}</p>
@@ -1027,6 +1031,26 @@ for (const [button, view] of [[els.stickerLibraryButton, "library"], [els.sticke
     renderStickerGallery();
   });
 }
+els.cleanStickerBlacklistFilesButton.addEventListener("click", async () => {
+  if (stickerActionSavingId || !Number(state?.qq?.stickers?.excludedCount || 0)) return;
+  if (!window.confirm("清理全部黑名单表情的本地文件？\n\n仅删除网关保存的黑名单表情文件，释放空间；黑名单、去重指纹和备注仍保留。QQ 收藏及群消息原图不受影响。\n\n文件删除不可撤销，无法直接恢复。须先解除黑名单，再等下次收到该表情后恢复收录。")) return;
+  stickerActionSavingId = "clean-blacklist-files";
+  setStickerGalleryActionStatus("正在清理黑名单本地文件，黑名单和备注将保留…", "progress");
+  renderStickerGallery();
+  try {
+    const response = await api("/api/qq/stickers/blacklist/clean-files", { method: "POST", body: "{}" });
+    state.qq.stickers = { ...response.stickers, labeling: state.qq.stickers?.labeling, curation: state.qq.stickers?.curation };
+    const result = response.result || {};
+    const summary = `已清理 ${Number(result.cleanedCount || 0)} 个本地文件，释放 ${formatBytes(result.freedBytes)}。黑名单和备注保留。`;
+    setStickerGalleryActionStatus(result.pendingFiles ? `${summary} 仍有 ${Number(result.pendingFiles)} 个文件暂未删除，可稍后再次清理。`
+      : `${summary} 已清理的表情须先解除黑名单，再等下次收到才能恢复。`, result.pendingFiles ? "error" : "success");
+  } catch (error) {
+    setStickerGalleryActionStatus(`清理失败：${error.message}。黑名单仍保留，可稍后重试。`, "error");
+  } finally {
+    stickerActionSavingId = "";
+    renderStickerGallery();
+  }
+});
 els.stickerGalleryGrid.addEventListener("input", (event) => {
   const form = event.target.closest("[data-sticker-edit-form]");
   if (form && form.dataset.stickerEditForm === stickerEditingId && event.target.name === "usage") {
@@ -1065,6 +1089,7 @@ els.stickerGalleryGrid.addEventListener("click", async (event) => {
   const action = forgetButton ? "forget" : restoreButton ? "restore" : "blacklist";
   if (action === "forget" && !window.confirm(`彻底删除并忘记这个表情？\n\n${item.usage || item.id}\n\n将清除网关记录、所有去重指纹和表情库副本。下次收到会作为新表情重新识别。群消息原图和 QQ 客户端收藏不受影响。此操作不可撤销。`)) return;
   if (action === "blacklist" && !window.confirm(`将这个表情移入黑名单？\n\n${item.usage}\n\n保留预览和备注，以后收到也不识别、不入库。可在黑名单中恢复。群消息原图和 QQ 客户端收藏不受影响。`)) return;
+  if (action === "restore" && !item.canRestore && !window.confirm("解除这个表情的黑名单？\n\n本地没有可直接恢复的完整副本。解除后，须等下次收到该表情才能恢复收录。")) return;
   stickerActionSavingId = id;
   setStickerGalleryActionStatus(action === "forget" ? "正在彻底删除并忘记…" : action === "restore" ? "正在移出黑名单…" : "正在移入黑名单…", "progress");
   stickerGallerySignature = "";
@@ -1077,7 +1102,7 @@ els.stickerGalleryGrid.addEventListener("click", async (event) => {
       stickerEditDraft = "";
     }
     setStickerGalleryActionStatus(action === "forget" ? "已彻底忘记所有指纹；下次收到会重新识别入库。QQ 客户端收藏未改动。"
-      : action === "restore" ? result.result?.restored ? `已恢复到表情库，${agentName()}可再次使用。` : "已解除黑名单；没有可恢复的完整副本，下次收到会重新识别。"
+      : action === "restore" ? result.result?.restored ? `已恢复到表情库，${agentName()}可再次使用。` : "已解除黑名单；没有可直接恢复的完整副本，下次收到该表情后才能恢复收录。"
       : "已移入黑名单，预览和备注保留；以后不再自动收录，可随时恢复。", "success");
   } catch (error) {
     setStickerGalleryActionStatus(`操作失败：${error.message}`, "error");

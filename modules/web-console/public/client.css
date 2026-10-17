@@ -304,6 +304,9 @@ h2 { font-size: 17px; line-height: 1.25; letter-spacing: -0.015em; }
 .gallery-library-switch { display: flex; flex-wrap: wrap; gap: 8px; }
 .gallery-library-switch .selected { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .gallery-library-help { margin: 10px 0 16px; }
+.gallery-blacklist-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.gallery-blacklist-tools .button { white-space: normal; }
+.gallery-blacklist-tools .field-note { flex: 1 1 240px; }
 .sticker-preview-placeholder { padding: 12px; color: var(--muted); font-size: 11px; text-align: center; }
 .sticker-card-actions [data-forget-sticker]:last-child:nth-child(3) { grid-column: 1 / -1; }
 .sticker-grid {
