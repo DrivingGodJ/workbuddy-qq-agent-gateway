@@ -512,13 +512,11 @@ test("chat, scheduled post and feed scan use separate turns in activation order"
   });
   const later = await fixture.store.appendMessage(message("123", "later", "老代，后来这条", { mentionedBot: true }));
   await fixture.store.requestTrigger("123", "mention", later);
-  worker.kick("123");
+  const laterChat = worker.kick("123");
   finishChat();
   await chat;
   await scheduled;
-  for (let attempt = 0; attempt < 100 && fixture.store.snapshot("123").pendingMessages.length; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await laterChat;
   assert.deepEqual(turns, ["chat", "post", "feed", "chat"]);
   assert.equal(fixture.store.snapshot("123").pendingMessages.length, 0);
 });
