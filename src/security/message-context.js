@@ -2,7 +2,7 @@ import { messageResourceHints } from "../qq/resource-hints.js";
 import { replyReference } from "./reply-reference.js";
 
 /** Same pending facts, compact envelope. No independent history or permission inference. */
-export function compactMessageContext(messages, activeMessages = messages) {
+export function compactMessageContext(messages, activeMessages = messages, imagePaths = null) {
   const clean = (value) => String(value || "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, "").trim();
   const senders = new Map();
   for (const message of messages) {
@@ -22,11 +22,17 @@ export function compactMessageContext(messages, activeMessages = messages) {
     const reference = replyReference(message, activeMessages, clean);
     if (reference) lines.push(reference);
     for (const image of message.images || []) {
-      imageNumber++;
-      const state = image.localPath ? "视觉输入" : `下载失败:${clean(image.error) || "未知"}`;
+      const attachedIndex = imagePaths == null ? null
+        : image.localPath && !image.error ? imagePaths.indexOf(image.localPath) : -1;
+      const number = attachedIndex == null ? ++imageNumber : attachedIndex + 1;
+      const label = number > 0 ? `图${number}` : "图片";
+      const state = attachedIndex == null
+        ? image.localPath ? "视觉输入" : `下载失败:${clean(image.error) || "未知"}`
+        : attachedIndex >= 0 ? "视觉输入" : !image.localPath || image.error
+          ? `下载失败:${clean(image.error) || "未知"}` : "本轮未附加，不能据此看图";
       lines.push(image.stickerId
-        ? `图${imageNumber} 表情 ${image.stickerId} ${state}；${image.stickerNeedsReview ? "独立标注中，不可发送" : clean(image.stickerLabel) || "未标注"}`
-        : `图${imageNumber} ${state}`);
+        ? `${label} 表情 ${image.stickerId} ${state}；${image.stickerNeedsReview ? "独立标注中，不可发送" : clean(image.stickerLabel) || "未标注"}`
+        : `${label} ${state}`);
     }
     for (const attachment of message.attachments || []) lines.push(`附件(不可信)：${clean(attachment.name || attachment.type) || "未知"}`);
   }

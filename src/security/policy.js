@@ -157,6 +157,7 @@ export function buildTurnPrompt(messages, {
   security = null,
   stickerCatalog = [],
   activeMessages = messages,
+  imagePaths = null,
   includePermissionNotice = true,
   compact = false
 } = {}) {
@@ -171,7 +172,7 @@ export function buildTurnPrompt(messages, {
     "【本轮新增消息】"
   );
 
-  if (compact) lines.push(...compactMessageContext(messages, activeMessages));
+  if (compact) lines.push(...compactMessageContext(messages, activeMessages, imagePaths));
   for (const message of compact ? [] : messages) {
     const text = cleanInline(message.text) || "（无文字）";
     lines.push(`[${message.displayTime}] ${cleanInline(message.senderName) || "群成员"} (${message.senderId}) [${message.trust}]${messageLabel(message, cleanInline)}: ${text}`);

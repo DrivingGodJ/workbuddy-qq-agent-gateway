@@ -33,7 +33,7 @@ function assertActionRequest(text, { speech = false } = {}) {
 
 /** A model-supplied identity or a message in quoted/source context is not authorization. */
 export function homeAssistantRequest({ store, messageReader, targetId, targetType = "group", ownerId, messageId, scheduledTask = false }) {
-  const message = messageReader?.messages?.get(String(messageId || ""));
+  const message = (messageReader?.directMessages || messageReader?.messages)?.get(String(messageId || ""));
   const snapshot = store.snapshot(targetId);
   const pending = snapshot.pendingMessages;
   const permission = snapshot.codexConfig?.homeAssistantPermission || "owner";

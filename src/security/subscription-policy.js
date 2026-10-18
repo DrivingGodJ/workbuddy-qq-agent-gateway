@@ -207,6 +207,7 @@ export function buildPrivateTurnPrompt(messages, contexts, {
   includeResponseInstruction = true,
   stickerCatalog = [],
   activeMessages = messages,
+  imagePaths = null,
   includePermissionNotice = true,
   compact = false
 } = {}) {
@@ -216,7 +217,7 @@ export function buildPrivateTurnPrompt(messages, contexts, {
   }
   if (includePermissionNotice) lines.push(`【本轮权限】${privatePermissionNotice(security)}`);
   lines.push(`【本轮新增私聊消息】${clean(displayName) || userId} (${userId})`);
-  if (compact) lines.push(...compactMessageContext(messages || [], activeMessages));
+  if (compact) lines.push(...compactMessageContext(messages || [], activeMessages, imagePaths));
   for (const message of compact ? [] : messages || []) {
     lines.push(`[${message.displayTime || message.timestamp || "时间未知"}] ${clean(message.senderName) || userId} (${message.senderId}) [${trustForSender(message.senderId)}]${messageLabel(message, clean)}: ${clean(message.text) || "（无文字）"}`);
     lines.push(...messageResourceHints(message));

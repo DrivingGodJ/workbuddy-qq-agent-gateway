@@ -575,10 +575,10 @@ export class SessionStore {
       group.lastReply = live.lastReply;
       group.lastCompletedReply = { text: live.lastReply, completedAt: this.nowIso(), messageId: live.lastReplyMessageId || null };
     }
-    group.deferredThroughSequence = cutoff ? 0 : Math.max(
-      Number(group.deferredThroughSequence || 0), Number(lastReadSequence || 0)
+    group.deferredThroughSequence = Math.max(
+      Number(group.deferredThroughSequence || 0), cutoff, Number(lastReadSequence || 0)
     );
-    if (!cutoff && group.pendingTrigger?.sequence != null
+    if (MESSAGE_WAKE_REASONS.has(group.pendingTrigger?.reason) && group.pendingTrigger?.sequence != null
       && Number(group.pendingTrigger.sequence) <= group.deferredThroughSequence) group.pendingTrigger = null;
     group.recentTurns.push({
       completedAt: this.nowIso(), turnId: turnId || null, trigger: trigger?.reason || null,
@@ -803,7 +803,12 @@ export class SessionStore {
     createdAt = null, bootstrapComplete = false, bootstrapRevision = 0
   } = {}) {
     const group = this.ensureGroup(groupId);
-    group.threadId = String(threadId || "") || null;
+    const nextThreadId = String(threadId || "") || null;
+    if (group.threadId !== nextThreadId) {
+      group.deferredThroughSequence = 0;
+      group.periodicCheckedThroughSequence = 0;
+    }
+    group.threadId = nextThreadId;
     group.replyFollowup = null;
     group.threadCreatedAt = createdAt || this.nowIso();
     group.lastActivityAt = this.nowIso();

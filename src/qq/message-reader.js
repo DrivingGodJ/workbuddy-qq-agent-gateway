@@ -10,21 +10,24 @@ const reply = (value, isError = false) => ({ isError, content: [{ type: "text", 
 export class QqMessageReader {
   constructor({ oneBot, linkReader = new PublicLinkReader() } = {}) {
     this.oneBot = oneBot; this.linkReader = linkReader;
-    this.messages = new Map(); this.forwardRefs = new Map(); this.urls = new Set();
+    this.messages = new Map(); this.directMessages = new Map(); this.forwardRefs = new Map(); this.urls = new Set();
     this.forwardCache = new Map(); this.linkCache = new Map();
   }
-  capture(messages) {
+  capture(messages, { quoted = false } = {}) {
     for (const message of messages || []) {
       if (!message) continue;
       const id = String(message.messageId || "");
-      if (id) this.messages.set(id, message);
+      if (id) {
+        if (!quoted) this.directMessages.set(id, message);
+        if (!quoted || !this.directMessages.has(id)) this.messages.set(id, message);
+      }
       for (const url of [...extractUrls(message.text), ...(message.links || [])]) {
         try { this.urls.add(new URL(url).href); } catch { /* invalid URL */ }
       }
       for (const attachment of message.attachments || []) {
         if (attachment.type === "forward" && attachment.fileId) this.forwardRefs.set(String(attachment.fileId), id);
       }
-      if (message.quotedMessage) this.capture([{ ...message.quotedMessage, quotedMessage: null }]);
+      if (message.quotedMessage) this.capture([{ ...message.quotedMessage, quotedMessage: null }], { quoted: true });
     }
   }
   async callTool(name, args = {}, { shouldStop = () => false } = {}) {

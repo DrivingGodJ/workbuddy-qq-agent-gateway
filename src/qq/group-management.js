@@ -181,7 +181,7 @@ export async function manageGroup({ oneBot, groupId, botId, ownerId, ownerMessag
       deny(`禁言秒数必须在 1–${ownerAuthorized ? 2_592_000 : 600} 之间。`);
     }
     if (!ownerAuthorized && action === "mute_member") {
-      const observed = [...(messageReader?.messages?.values() || [])].some((message) =>
+      const observed = [...((messageReader?.directMessages || messageReader?.messages)?.values() || [])].some((message) =>
         /^-?\d+$/u.test(String(message.messageId || ""))
         && Number.isInteger(Number(message.sequence)) && Number(message.sequence) > 0
         && String(message.groupId) === String(groupId) && String(message.senderId) === userId);

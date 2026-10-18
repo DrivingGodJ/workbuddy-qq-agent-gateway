@@ -1,4 +1,9 @@
 /** Shared message window for the panel and the scoped MCP reader; no hidden history. */
+export function conversationReadSequence(group) {
+  const sequence = Number(group.deferredThroughSequence || 0);
+  return Number.isSafeInteger(sequence) && sequence > 0 ? sequence : 0;
+}
+
 export function conversationActivityWindow(group) {
   return {
     lastCompletedReply: group.lastCompletedReply || null,

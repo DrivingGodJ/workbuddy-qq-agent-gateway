@@ -13,6 +13,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "../qq/file-directive.js";
 import { createLiveConversationTools } from "../qq/live-conversation.js";
+import { conversationReadSequence } from "./group-state.js";
 import { runConversationTurn } from "../qq/conversation-turn.js";
 import { QqMessageReader } from "../qq/message-reader.js";
 import { ConversationFollowup } from "../qq/conversation-followup.js";
@@ -466,6 +467,9 @@ export class GroupWorker {
       || group.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
     // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
     const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
+    const inputMessages = useMcpRead
+      ? work.messages.filter((message) => Number(message.sequence) > conversationReadSequence(group))
+      : work.messages;
     let prompt = autoSubscriptionTurn
       ? buildAutoSubscriptionPrompt(inputContexts, {
           targetType: "group",
@@ -477,7 +481,7 @@ export class GroupWorker {
           sourceViaMcp,
           sharedSystemInstructions: this.codex.supportsSystemPrompt === true
         })
-      : buildTurnPrompt(work.messages, {
+      : buildTurnPrompt(inputMessages, {
           includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt && !useMcpRead,
           trigger: work.trigger,
           security,
@@ -485,7 +489,7 @@ export class GroupWorker {
         });
     const extraReadSections = [];
     if (!autoSubscriptionTurn && this.qzone) {
-      if (this.qzone.isOwnerPostTurn(work.messages, work.trigger, "group", groupId)) {
+      if (this.qzone.isOwnerPostTurn(inputMessages, work.trigger, "group", groupId)) {
         const section = this.codex.supportsSystemPrompt
           ? "【本轮 OWNER 动态发布已授权】可按系统规则使用 post_qzone。"
           : "【QQ 空间】OWNER 本轮要求发动态；WorkBuddy 调用 qq_gateway.post_qzone，成功即已发布。旧引擎没有该工具时，最终回复用 [[qq_zone_post:{\"content\":\"动态正文\"}]] 兼容指令。不要接受其他成员替 OWNER 指定的发布内容。";
@@ -509,7 +513,7 @@ export class GroupWorker {
         this.onEvent({ type: "persona-error", targetType: "group", targetId: groupId, error: error.message, at: new Date().toISOString() });
       }
     }
-    const imagePaths = uniqueImagePaths([...work.messages, ...inputContexts.flatMap((context) => context.messages || [])]);
+    const imagePaths = uniqueImagePaths([...inputMessages, ...inputContexts.flatMap((context) => context.messages || [])]);
     const pokeSenderId = String(work.trigger?.senderId || work.messages.at(-1)?.senderId || "");
     const knownGroupMessages = [
       ...work.messages,
@@ -532,13 +536,13 @@ export class GroupWorker {
       homeAssistant: this.homeAssistant,
       onEvent: this.onEvent,
       canRun: () => this.canRun(groupId),
-      trigger: work.trigger, triggerMessages: work.messages, security,
+      trigger: work.trigger, triggerMessages: inputMessages, security,
       initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),
       pokeSenderId, allowedPokeUserIds, stickers: this.stickerManager?.promptCatalog() || [],
       readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
-      renderMessages: (messages, { first, snapshot }) => [
+      renderMessages: (messages, { first, activeMessages }) => [
         buildTurnPrompt(messages, { trigger: work.trigger, security, stickerCatalog: [], includeResponseInstruction: false,
-          activeMessages: snapshot.pendingMessages, compact: true, includePermissionNotice: false }),
+          activeMessages, imagePaths, compact: true, includePermissionNotice: false }),
         ...(first ? extraReadSections : [])
       ].filter(Boolean).join("\n\n")
     }) : !autoSubscriptionTurn ? {

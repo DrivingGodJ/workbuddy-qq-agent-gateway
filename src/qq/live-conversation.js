@@ -5,7 +5,7 @@ import { QQ_FACE_ALIASES } from "./file-directive.js";
 import { AGENT_QQ_ID, OWNER_QQ_ID, sanitizeGroupReply } from "../security/policy.js";
 import { QqMessageReader, MESSAGE_READER_TOOLS } from "./message-reader.js";
 import { readGroupManagement, manageGroup } from "./group-management.js";
-import { conversationActivityWindow } from "../groups/group-state.js";
+import { conversationActivityWindow, conversationReadSequence } from "../groups/group-state.js";
 import { homeAssistantRequest } from "../automation/home-assistant.js";
 
 const PAGE_SIZE = 40;
@@ -20,7 +20,7 @@ function answer(text, isError = false) {
 
 /** Only a directly read OWNER group message in this turn may authorize management. */
 export function currentOwnerManagementMessage(messageReader, groupId, ownerId, isRecalled = () => false) {
-  return [...(messageReader?.messages?.values() || [])]
+  return [...((messageReader?.directMessages || messageReader?.messages)?.values() || [])]
     .filter((message) => String(message.groupId) === String(groupId)
       && String(message.senderId) === String(ownerId) && message.trust === "OWNER"
       && message.source === "qq" && Number.isInteger(Number(message.sequence))
@@ -31,7 +31,7 @@ export function currentOwnerManagementMessage(messageReader, groupId, ownerId, i
 /** Only unread QQ messages actually captured from this target can elevate Space access. */
 function currentOwnerQzoneMessages(store, messageReader, targetId) {
   const pending = new Set(store.snapshot(targetId).pendingMessages.map((message) => String(message.messageId)));
-  return [...messageReader.messages.values()].filter((message) =>
+  return [...(messageReader.directMessages || messageReader.messages).values()].filter((message) =>
     pending.has(String(message.messageId)) && String(message.groupId) === String(targetId)
       && String(message.senderId) === OWNER_QQ_ID && message.trust === "OWNER"
       && message.source === "qq" && Number.isInteger(Number(message.sequence))
@@ -85,7 +85,9 @@ export function createLiveConversationTools({
     scheduledQzonePost: scheduledTask,
     qzoneReadCalled: false,
     readCalled: false,
-    lastReadSequence: 0,
+    // Only successfully completed rounds commit this cursor. An interrupted
+    // liveSession read is not an acknowledgement and must be replayed.
+    lastReadSequence: scheduledTask ? 0 : conversationReadSequence(store.snapshot(targetId)),
     actionCount: 0,
     managementActionCount: (store.snapshot(targetId).liveSession?.actions || [])
       .filter((item) => item.kind === "group_management").length,
@@ -230,7 +232,8 @@ export function createLiveConversationTools({
       const previousReply = first && activity.lastCompletedReply?.text
         ? `【上一次完整回答】${activity.lastCompletedReply.messageId ? ` [消息 ID ${activity.lastCompletedReply.messageId}]` : ""}\n${activity.lastCompletedReply.text}`
         : "";
-      const output = [previousReply, renderMessages(readable, { first, snapshot })].filter(Boolean).join("\n\n");
+      const activeMessages = [...messageReader.messages.values(), ...readable];
+      const output = [previousReply, renderMessages(readable, { first, snapshot, activeMessages })].filter(Boolean).join("\n\n");
       messageReader.capture(readable);
       if (first) messageReader.capture(readOnlyContextMessages);
       if (readable.length) {

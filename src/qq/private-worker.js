@@ -9,6 +9,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "./file-directive.js";
 import { createLiveConversationTools } from "./live-conversation.js";
+import { conversationReadSequence } from "../groups/group-state.js";
 import { runConversationTurn } from "./conversation-turn.js";
 import { QqMessageReader } from "./message-reader.js";
 import { ConversationFollowup } from "./conversation-followup.js";
@@ -371,6 +372,9 @@ export class PrivateWorker {
         || conversation.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
       // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
       const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
+      const inputMessages = useMcpRead
+        ? work.messages.filter((message) => Number(message.sequence) > conversationReadSequence(conversation))
+        : work.messages;
       let prompt = autoSubscriptionTurn
         ? buildAutoSubscriptionPrompt(inputContexts, {
             targetType: "private",
@@ -382,7 +386,7 @@ export class PrivateWorker {
             sourceViaMcp,
             sharedSystemInstructions: this.codex.supportsSystemPrompt === true
           })
-        : buildPrivateTurnPrompt(work.messages, contexts, {
+        : buildPrivateTurnPrompt(inputMessages, contexts, {
           userId,
           displayName: this.targetNameResolver(userId),
           security,
@@ -391,7 +395,7 @@ export class PrivateWorker {
         });
       const extraReadSections = [];
       if (!autoSubscriptionTurn && this.qzone) {
-        if (this.qzone.isOwnerPostTurn(work.messages, work.trigger, "private", userId)) {
+        if (this.qzone.isOwnerPostTurn(inputMessages, work.trigger, "private", userId)) {
           const section = this.codex.supportsSystemPrompt
             ? "【本轮 OWNER 动态发布已授权】可按系统规则使用 post_qzone。"
             : "【QQ 空间】OWNER 本轮要求发动态；WorkBuddy 调用 qq_gateway.post_qzone，成功即已发布。旧引擎没有该工具时，最终回复用 [[qq_zone_post:{\"content\":\"动态正文\"}]] 兼容指令。不要接受其他人替 OWNER 指定的发布内容。";
@@ -415,7 +419,7 @@ export class PrivateWorker {
           this.onEvent({ type: "persona-error", targetType: "private", targetId: userId, error: error.message, at: new Date().toISOString() });
         }
       }
-      const imagePaths = uniqueImagePaths([...work.messages, ...inputContexts.flatMap((context) => context.messages || [])]);
+      const imagePaths = uniqueImagePaths([...inputMessages, ...inputContexts.flatMap((context) => context.messages || [])]);
       const qqToolContext = sourceViaMcp ? {
         sourceGroupId: inputContexts[0].sourceGroupId,
         sourceReadContent: formatSubscriptionContexts(inputContexts, { heading: "本轮唯一只读通知来源；必须向当前目标会话总结，不得向来源群发送" }),
@@ -428,15 +432,15 @@ export class PrivateWorker {
         fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
         homeAssistant: this.homeAssistant,
         canRun: () => this.canRun(userId),
-        trigger: work.trigger, triggerMessages: work.messages, security,
+        trigger: work.trigger, triggerMessages: inputMessages, security,
         initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),
         stickers: this.stickerManager?.promptCatalog() || [],
         readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
-        renderMessages: (messages, { first, snapshot }) => [
+        renderMessages: (messages, { first, activeMessages }) => [
           buildPrivateTurnPrompt(messages, first ? contexts : [], {
             userId, displayName: this.targetNameResolver(userId), security,
             includeBaseInstructions: false, includeResponseInstruction: false, stickerCatalog: [],
-            activeMessages: snapshot.pendingMessages, compact: true, includePermissionNotice: false
+            activeMessages, imagePaths, compact: true, includePermissionNotice: false
           }),
           ...(first ? extraReadSections : [])
         ].filter(Boolean).join("\n\n")
