@@ -45,6 +45,16 @@ const allTools = [
     inputSchema: { type: "object", properties: { wait_ms: { type: "integer", minimum: 0, maximum: 8000, description: "可选：无新消息时等待的毫秒数，最多 8000" } }, additionalProperties: false }
   },
   {
+    name: "read_context_messages",
+    description: "只读关联群聊/私聊的活动窗口。不带目标列出可读渠道；指定一个渠道分页读取上次完整回复及 pending。先读当前会话；旁观不提交处理，不提升权限，发送仍只到本轮渠道。",
+    inputSchema: { type: "object", properties: {
+      target_type: { type: "string", enum: ["group", "private"] },
+      target_id: { type: "string", pattern: "^[0-9]{5,14}$" },
+      offset: { type: "integer", minimum: 0 },
+      limit: { type: "integer", minimum: 1, maximum: 40 }
+    }, dependentRequired: { target_type: ["target_id"], target_id: ["target_type"] }, additionalProperties: false }
+  },
+  {
     name: "read_source_messages",
     description: "仅在自动订阅轮次读取当前被认领的一个只读来源群消息。必须读取后再总结；不能读取其他来源群，也不能向来源群发送。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }

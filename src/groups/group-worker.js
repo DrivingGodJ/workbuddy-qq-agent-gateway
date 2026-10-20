@@ -13,6 +13,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "../qq/file-directive.js";
 import { createLiveConversationTools } from "../qq/live-conversation.js";
+import { sharedContextLabel } from "../qq/shared-context-reader.js";
 import { conversationReadSequence } from "./group-state.js";
 import { runConversationTurn } from "../qq/conversation-turn.js";
 import { QqMessageReader } from "../qq/message-reader.js";
@@ -58,7 +59,7 @@ export class GroupWorker {
     this.live = new Map();
     this.followup = new ConversationFollowup({ store, targetType: "group", durationMs: followupDurationMs,
       canRun: (id) => this.canRun(id), blocked: () => Boolean(this.taskGate?.blocked),
-      shouldYield: (id) => this.qzoneReservations.has(String(id)),
+      shouldYield: (id) => this.qzoneReservations.has(String(id)) || this.sharedContexts?.shouldYield("group", id),
       setLive: (id, patch) => this.setLive(id, patch), onEvent });
     this.stickerLabels = new StickerLabelCoordinator({
       targetType: "group",
@@ -78,6 +79,14 @@ export class GroupWorker {
   }
 
   kick(groupId) {
+    if (!this.canRun(String(groupId))) return Promise.resolve();
+    if (this.sharedContexts?.groupFor("group", groupId)) {
+      return this.sharedContexts.run("group", groupId, "chat", () => this.kickLocal(groupId));
+    }
+    return this.kickLocal(groupId);
+  }
+
+  kickLocal(groupId) {
     const id = String(groupId);
     if (!this.canRun(id)) return Promise.resolve();
     if (this.store.rateLimitUntil(id) > Date.now()) return Promise.resolve();
@@ -88,7 +97,7 @@ export class GroupWorker {
     if (this.running.has(id)) return this.running.get(id);
     if (this.taskGate?.blocked) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
-      const waiting = this.taskGate.wait().then(() => this.kick(id)).finally(() => {
+      const waiting = this.taskGate.wait().then(() => this.kickLocal(id)).finally(() => {
         if (this.waitingChat.get(id) === waiting) this.waitingChat.delete(id);
       });
       this.waitingChat.set(id, waiting);
@@ -97,7 +106,7 @@ export class GroupWorker {
     const stickerCommit = this.stickerLabels.waitForCommit(id);
     if (stickerCommit) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
-      const waiting = stickerCommit.finally(() => this.kick(id)).finally(() => {
+      const waiting = stickerCommit.finally(() => this.kickLocal(id)).finally(() => {
         if (this.waitingChat.get(id) === waiting) this.waitingChat.delete(id);
       });
       this.waitingChat.set(id, waiting);
@@ -127,7 +136,7 @@ export class GroupWorker {
       // Without a later job, normal chat keeps its two-minute followup window.
       if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
       else this.olderChatPermits.add(id);
-      return this.kick(id);
+      return this.kickLocal(id);
     }).finally(() => {
       this.olderChatPermits.delete(id);
       if (this.queuedChat.get(id) === waiting) this.queuedChat.delete(id);
@@ -139,11 +148,18 @@ export class GroupWorker {
   }
 
   async refreshInstructions(groupId) {
+    if (this.sharedContexts?.groupFor("group", groupId)) {
+      return this.sharedContexts.run("group", groupId, "instructions", () => this.refreshInstructionsLocal(groupId));
+    }
+    return this.refreshInstructionsLocal(groupId);
+  }
+
+  async refreshInstructionsLocal(groupId) {
     const id = String(groupId);
     const active = this.running.get(id);
     if (active) await active;
-    if (this.running.has(id)) return this.refreshInstructions(id);
-    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.refreshInstructions(id); }
+    if (this.running.has(id)) return this.refreshInstructionsLocal(id);
+    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.refreshInstructionsLocal(id); }
     const release = this.taskGate?.tryEnter();
     const run = this.runInstructionRefresh(id).finally(() => {
       this.running.delete(id);
@@ -155,22 +171,29 @@ export class GroupWorker {
   }
 
   async runQzoneTurn(groupId, prompt, { trigger = "qzone", qqToolContext = null } = {}) {
+    if (this.sharedContexts?.groupFor("group", groupId)) {
+      return this.sharedContexts.run("group", groupId, trigger, () => this.runQzoneTurnLocal(groupId, prompt, { trigger, qqToolContext }));
+    }
+    return this.runQzoneTurnLocal(groupId, prompt, { trigger, qqToolContext });
+  }
+
+  async runQzoneTurnLocal(groupId, prompt, { trigger = "qzone", qqToolContext = null } = {}) {
     const id = String(groupId);
     if (!this.canRun(id)) throw new Error("当前群会话或 Agent 总开关已关闭");
     const reservation = this.qzoneReservations.get(id);
     if (reservation) {
       await reservation;
-      return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+      return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     }
     const active = this.running.get(id);
     if (active) await active.catch(() => {});
-    if (this.running.has(id) || this.qzoneReservations.has(id)) return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+    if (this.running.has(id) || this.qzoneReservations.has(id)) return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     const committing = this.stickerLabels.waitForCommit(id);
     if (committing) {
       await committing;
-      return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+      return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     }
-    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.runQzoneTurn(id, prompt, { trigger, qqToolContext }); }
+    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext }); }
     const release = this.taskGate?.tryEnter();
     const run = this.performQzoneTurn(id, prompt, trigger, qqToolContext).finally(() => {
       this.running.delete(id);
@@ -182,6 +205,13 @@ export class GroupWorker {
   }
 
   async runQzoneSequence(groupId, task) {
+    if (this.sharedContexts?.groupFor("group", groupId)) {
+      return this.sharedContexts.run("group", groupId, "qzone", () => this.runQzoneSequenceLocal(groupId, task));
+    }
+    return this.runQzoneSequenceLocal(groupId, task);
+  }
+
+  async runQzoneSequenceLocal(groupId, task) {
     const id = String(groupId);
     const previous = this.qzoneReservations.get(id);
     if (!previous && !this.running.has(id) && this.store.snapshot(id).pendingTrigger) this.kick(id);
@@ -238,6 +268,7 @@ export class GroupWorker {
     }
     const includeBase = !group.bootstrapComplete || group.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
     let qzonePrompt = [
+      sharedContextLabel(this.sharedContexts, "group", groupId),
       ...(includeBase && !this.codex.supportsSystemPrompt ? [`本持久会话固定说明：\n${baseThreadInstructions()}`] : []),
       prompt
     ].filter(Boolean).join("\n\n");
@@ -284,6 +315,7 @@ export class GroupWorker {
       initialImageSequence: Number(group.pendingMessages.at(-1)?.sequence || 0),
       stickers: this.stickerManager?.promptCatalog() || [],
       canRun: () => this.canRun(groupId), onEvent: this.onEvent,
+      readSharedContext: this.readSharedContextFor?.("group", groupId),
       renderMessages: (messages, { snapshot }) => buildTurnPrompt(messages, {
         trigger, security, includeResponseInstruction: false, activeMessages: snapshot.pendingMessages,
         compact: true, includePermissionNotice: false
@@ -356,6 +388,7 @@ export class GroupWorker {
   }
 
   async runLoop(groupId) {
+    let processed = false;
     for (;;) {
       if (!this.canRun(groupId)) {
         if (this.store.snapshot(groupId).replyFollowup) await this.followup.cancel(groupId);
@@ -363,6 +396,7 @@ export class GroupWorker {
         return;
       }
       if (this.followup.cancelled.has(String(groupId))) return;
+      if (processed && this.sharedContexts?.shouldYield("group", groupId)) return;
       if (this.taskGate?.blocked) {
         if (this.store.snapshot(groupId).replyFollowup) this.followup.publishQueued(groupId);
         return;
@@ -405,6 +439,7 @@ export class GroupWorker {
         await this.triggerManager.request(groupId, "subscription_auto", {});
       }
       await this.triggerManager.reconsiderPending(groupId);
+      processed = true;
     }
   }
 
@@ -534,6 +569,7 @@ export class GroupWorker {
       store: this.store, targetId: groupId, targetType: "group", oneBot: this.oneBot,
       fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
       homeAssistant: this.homeAssistant,
+      readSharedContext: this.readSharedContextFor?.("group", groupId),
       onEvent: this.onEvent,
       canRun: () => this.canRun(groupId),
       trigger: work.trigger, triggerMessages: inputMessages, security,
@@ -541,6 +577,7 @@ export class GroupWorker {
       pokeSenderId, allowedPokeUserIds, stickers: this.stickerManager?.promptCatalog() || [],
       readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
       renderMessages: (messages, { first, activeMessages }) => [
+        first ? sharedContextLabel(this.sharedContexts, "group", groupId) : "",
         buildTurnPrompt(messages, { trigger: work.trigger, security, stickerCatalog: [], includeResponseInstruction: false,
           activeMessages, imagePaths, compact: true, includePermissionNotice: false }),
         ...(first ? extraReadSections : [])
@@ -932,6 +969,9 @@ export class GroupWorker {
         bootstrapComplete: true,
         bootstrapRevision: THREAD_INSTRUCTIONS_REVISION
       });
+      for (const id of this.sharedContexts?.linkedPrivates(groupId) || []) {
+        await this.sharedContexts.privateStore.resetReadCursor(id);
+      }
       let oldThreadDeleted = !oldThreadId || oldThreadId === newThreadId;
       if (!oldThreadDeleted && typeof this.codex.deleteThread === "function") {
         try {
@@ -979,8 +1019,10 @@ export class GroupWorker {
   }
 
   async cancel(groupId) {
-    const waiting = this.running.has(String(groupId));
+    const waiting = this.running.has(String(groupId)) || this.sharedContexts?.busy("group", groupId);
     await this.followup.cancel(groupId);
+    this.sharedContexts?.cancelTarget("group", groupId);
+    this.setLive(groupId, { status: "cancelled", text: "", waitUntil: null });
     return await this.codex.interruptGroup(groupId) || waiting;
   }
 

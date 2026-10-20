@@ -11,6 +11,7 @@ const els = Object.fromEntries([
   "addPrivateButton", "privateForm", "privateUserId", "privateDisplayName", "privateFormStatus", "savePrivateButton", "cancelPrivateButton",
   "hubStatus", "oneBotStatus", "codexStatus", "sessionDetails", "subscriptionDetails", "subscriptionCount", "subscriptionList",
   "agentSettingsDetails", "agentSettingsSummary", "agentSettingsForm", "agentModel", "agentReasoningEffort",
+  "contextLinkForm", "contextLinkGroup", "contextLinkHint", "contextLinkStatus", "saveContextLinkButton", "sharedContextInfo",
   "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentModeExplanation",
   "agentSpeakerMorning", "agentSpeakerNoon", "agentSpeakerNight", "speakerGreetingsHint",
   "agentSettingsHint", "agentSettingsStatus", "saveAgentSettingsButton",
@@ -39,6 +40,9 @@ let conversationStructureSignature = "";
 let navigationSignature = "";
 let settingsSignature = "";
 let settingsDirty = false;
+let settingsSavingKey = "";
+let settingsContextKey = "";
+const contextLinkDrafts = new Map();
 let stickerLabelSignature = "";
 let stickerLabelDirty = false;
 let stickerGallerySignature = "";
@@ -278,7 +282,7 @@ function renderNavigation(all) {
   els.groupCount.textContent = String(all.length);
   els.agentGroupCount.textContent = String(groups.length);
   els.sourceCount.textContent = String(sources.length);
-  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.speakerGreetingActivity, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
+  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.speakerGreetingActivity, item.data.contextLink, item.data.contextQueue, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
   if (signature === navigationSignature) return;
   navigationSignature = signature;
   els.groupList.innerHTML = groups.length ? groups.map(renderNavigationButton).join("") : `<p class="empty compact">${query ? "没有匹配群聊" : "尚未配置 Agent 群"}</p>`;
@@ -376,8 +380,11 @@ function renderSelected(item) {
   els.agentSettingsDetails.hidden = !item || source;
   els.personaDetails.hidden = false;
   els.subscriptionDetails.hidden = !item || source;
-  els.threadId.textContent = source ? "只读来源" : (data?.threadId || "尚未创建");
-  els.threadId.title = data?.threadId || "";
+  const effectiveThreadId = data?.contextLink?.threadId || data?.threadId;
+  els.threadId.textContent = source ? "只读来源" : (effectiveThreadId || "尚未创建");
+  els.threadId.title = data?.contextLink ? `共享群聊会话；搁置的私聊：${data.contextLink.parkedThreadId || "尚未创建"}` : effectiveThreadId || "";
+  els.resetButton.disabled = Boolean(data?.contextLink);
+  els.resetButton.title = data?.contextLink ? "先解除上下文关联，再新建独立私聊会话；群聊会话请在群聊设置中操作。" : "";
   els.threadLockState.textContent = source ? "不适用" : formatThreadLock(data?.threadLock);
   els.threadLockState.title = data?.threadLock?.error || "";
   els.threadCreatedAt.textContent = source ? "—" : formatTime(data?.threadCreatedAt);
@@ -453,6 +460,7 @@ async function loadInputPreview() {
 function renderAgentSettings(item) {
   if (!item || item.kind === "source") return;
   const data = item.data;
+  renderContextLink(item);
   const config = data.codexConfig || {
     model: state?.ai?.model,
     reasoningEffort: state?.ai?.reasoningEffort,
@@ -463,13 +471,18 @@ function renderAgentSettings(item) {
     homeAssistantPermission: "owner",
     speakerGreetings: { morning: false, noon: false, night: false }
   };
-  const model = modelInfo(config.model);
-  els.agentSettingsSummary.textContent = `${permissionModeLabel(config.permissionMode)} · ${model?.displayName || config.model || "默认"} · ${effortLabel(config.reasoningEffort)} · 自动化${config.calendarRemindersEnabled === false ? "关" : "开"}`;
-  const nextSignature = JSON.stringify([item.key, config, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions, state?.ai?.speakerGreetingsAvailable]);
+  const modelConfig = data.contextLink ? data.effectiveCodexConfig || config : config;
+  const model = modelInfo(modelConfig.model);
+  els.agentSettingsSummary.textContent = `${data.contextLink ? "共享群 · " : ""}${permissionModeLabel(config.permissionMode)} · ${model?.displayName || modelConfig.model || "默认"} · ${effortLabel(modelConfig.reasoningEffort)} · 自动化${config.calendarRemindersEnabled === false ? "关" : "开"}`;
+  const nextSignature = JSON.stringify([item.key, config, modelConfig, data.contextLink, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions, state?.ai?.speakerGreetingsAvailable]);
+  const nextContextKey = `${item.key}:${data.contextLink?.groupId || ""}`;
+  if ((!settingsDirty || settingsContextKey !== nextContextKey) && settingsSignature !== nextSignature) {
+    populateModelOptions(modelConfig.model);
+    populateEffortOptions(modelConfig.reasoningEffort);
+    populateContextOptions(modelConfig.contextTokenLimit);
+  }
+  settingsContextKey = nextContextKey;
   if (!settingsDirty && settingsSignature !== nextSignature) {
-    populateModelOptions(config.model);
-    populateEffortOptions(config.reasoningEffort);
-    populateContextOptions(config.contextTokenLimit);
     populatePermissionOptions(config.permissionMode, item.kind);
     els.agentCalendarRemindersEnabled.checked = config.calendarRemindersEnabled !== false;
     populateHomeAssistantPermissionOptions(config.homeAssistantPermission || "owner", item.kind);
@@ -479,8 +492,8 @@ function renderAgentSettings(item) {
     settingsSignature = nextSignature;
   }
   updateParameterExplanation(item);
-  const busy = Boolean(data.busy || data.activeReply?.running || isSpeakerGreetingBusy(data));
-  for (const control of [els.agentModel, els.agentReasoningEffort, els.agentContextTokenLimit]) control.disabled = busy;
+  const busy = Boolean(settingsSavingKey === item.key || contextLinkDrafts.get(item.key)?.saving || data.busy || data.activeReply?.running || isSpeakerGreetingBusy(data));
+  for (const control of [els.agentModel, els.agentReasoningEffort, els.agentContextTokenLimit]) control.disabled = busy || Boolean(data.contextLink);
   els.agentPermissionMode.disabled = busy;
   els.agentCalendarRemindersEnabled.disabled = busy;
   els.agentHomeAssistantPermission.disabled = busy;
@@ -496,9 +509,44 @@ function renderAgentSettings(item) {
   els.saveAgentSettingsButton.disabled = busy || !settingsDirty;
   els.agentSettingsHint.textContent = busy
     ? "会话运行中暂不能修改权限；请先立即终止，或等待本轮结束。未保存的选择会保留。"
+    : data.contextLink ? "模型、思考强度和压缩阈值继承关联群聊，请前往该群更改；下方权限只影响当前私聊。"
     : item.kind === "group" && els.agentPermissionMode.value === "dangerFullAccess"
         ? `家居权限保存后立即生效；其他参数下轮生效。当前群的所有成员都能通过${agentName()}操作本机和发送本机文件。`
         : "家居权限保存后立即生效；其他参数从下一轮起生效，历史 thread 不变。";
+}
+
+function renderContextLink(item) {
+  const data = item.data;
+  const link = data.contextLink;
+  const linkedCount = data.contextQueue?.linkedPrivateIds?.length || 0;
+  els.contextLinkForm.hidden = item.kind !== "private";
+  els.sharedContextInfo.hidden = !link && !linkedCount;
+  els.sharedContextInfo.textContent = link
+    ? `正在共享：${link.groupName || link.groupId}（群 ${link.groupId}）。原私聊会话已搁置：${link.parkedThreadId || "尚未创建"}。模型参数继承群聊，消息按渠道独立读取和发送。`
+    : linkedCount ? `已有 ${linkedCount} 个私聊共用本群上下文和工作区；各渠道消息独立，触发任务共用顺序队列。` : "";
+  if (item.kind !== "private") return;
+  const currentGroupId = String(link?.groupId || "");
+  const draft = contextLinkDrafts.get(item.key) || { groupId: currentGroupId, dirty: false, saving: false, message: "", error: false };
+  contextLinkDrafts.set(item.key, draft);
+  if (!draft.dirty && !draft.saving) draft.groupId = currentGroupId;
+  const groups = Object.values(state?.qq?.groups || {});
+  const groupIds = new Set(groups.map((group) => String(group.targetId || group.groupId)));
+  const options = '<option value="">独立私聊</option>' + groups.map((group) => {
+    const id = String(group.targetId || group.groupId);
+    return `<option value="${escapeHtml(id)}">${escapeHtml(group.groupName || id)} · ${escapeHtml(id)}</option>`;
+  }).join("") + (draft.groupId && !groupIds.has(draft.groupId) ? `<option value="${escapeHtml(draft.groupId)}" disabled>群 ${escapeHtml(draft.groupId)}（当前不可用）</option>` : "");
+  if (els.contextLinkGroup.innerHTML !== options) els.contextLinkGroup.innerHTML = options;
+  els.contextLinkGroup.value = draft.groupId;
+  const busy = Boolean(settingsSavingKey === item.key || data.busy || data.activeReply?.running || data.qzoneActivity || isSpeakerGreetingBusy(data) || data.contextQueue?.active || data.contextQueue?.queued?.length);
+  els.contextLinkGroup.disabled = draft.saving;
+  els.saveContextLinkButton.disabled = draft.saving || busy || !draft.dirty || Boolean(draft.groupId && !groupIds.has(draft.groupId));
+  els.saveContextLinkButton.textContent = draft.saving ? "正在保存关联…" : "保存上下文关联";
+  els.contextLinkForm.setAttribute("aria-busy", String(draft.saving));
+  els.contextLinkHint.textContent = busy
+    ? "相关会话有运行或排队任务，请先终止相关任务，或等待队列结束后保存。未保存的选择会保留。"
+    : "解绑后恢复原私聊会话；已进入群上下文的私聊内容无法从群会话中抹除。文件、家居和通知自动化权限仍按各渠道单独设置。";
+  els.contextLinkStatus.textContent = draft.message;
+  els.contextLinkStatus.className = `form-status${draft.error ? " error" : ""}`;
 }
 
 function renderPersona(item) {
@@ -1220,10 +1268,58 @@ els.agentCalendarRemindersEnabled.addEventListener("change", () => {
   updateParameterExplanation(currentTarget());
   markSettingsDirty();
 });
+els.contextLinkGroup.addEventListener("change", () => {
+  const item = currentTarget();
+  if (item?.kind !== "private") return;
+  const draft = contextLinkDrafts.get(item.key);
+  if (!draft || draft.saving) return;
+  draft.groupId = els.contextLinkGroup.value;
+  draft.dirty = draft.groupId !== String(item.data.contextLink?.groupId || "");
+  draft.message = draft.dirty ? "有未保存的上下文关联" : "";
+  draft.error = false;
+  renderContextLink(item);
+});
+els.contextLinkForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const item = currentTarget();
+  if (item?.kind !== "private") return;
+  const draft = contextLinkDrafts.get(item.key);
+  if (!draft?.dirty || draft.saving || settingsSavingKey) return;
+  const groupId = draft.groupId || null;
+  const group = groupId ? state?.qq?.groups?.[groupId] : null;
+  if (groupId && !group) return;
+  const warning = groupId
+    ? `将此私聊加入“${group.groupName || groupId}”的上下文？\n\n双方共享模型上下文和群工作区，私聊内容可能影响群聊回复。原私聊会话搁置保留；解绑可恢复原会话，但无法抹除已进入群上下文的私聊内容。\n\n消息仍分别读取和发送，触发任务按顺序排队。文件、家居和通知自动化权限仍各自独立，不会继承群权限。`
+    : "解除此私聊的群上下文关联？\n\n之后恢复搁置的原私聊会话。已进入群上下文的私聊内容仍会保留在群会话中，不能通过解绑抹除。";
+  if (!window.confirm(warning)) return;
+  draft.saving = true;
+  draft.message = "正在保存上下文关联…";
+  draft.error = false;
+  renderContextLink(item);
+  try {
+    const response = await api(`/api/qq/private/${encodeURIComponent(item.data.targetId)}/context-link`, {
+      method: "POST", body: JSON.stringify({ groupId, acknowledgeSharedContext: true })
+    });
+    item.data.contextLink = response.contextLink;
+    item.data.contextQueue = response.contextQueue;
+    draft.dirty = false;
+    draft.message = groupId ? "已关联；模型上下文与群聊共享，原私聊会话保留。" : "已解绑，恢复使用原私聊会话。";
+    settingsSignature = "";
+    await refresh();
+  } catch (error) {
+    draft.message = `${error.message}。选择已保留；若相关任务尚未结束，请先终止或等待队列完成后重试。`;
+    draft.error = true;
+    draft.dirty = true;
+  } finally {
+    draft.saving = false;
+    const current = currentTarget();
+    if (current?.key === item.key) renderAgentSettings(current);
+  }
+});
 els.agentSettingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const item = currentTarget();
-  if (!item || item.data.busy || item.data.activeReply?.running || isSpeakerGreetingBusy(item.data)) return;
+  if (!item || settingsSavingKey || contextLinkDrafts.get(item.key)?.saving || item.data.busy || item.data.activeReply?.running || isSpeakerGreetingBusy(item.data)) return;
   const enablingGroupFullAccess = item.kind === "group"
     && els.agentPermissionMode.value === "dangerFullAccess"
     && item.data.codexConfig?.permissionMode !== "dangerFullAccess";
@@ -1232,6 +1328,7 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
     && els.agentHomeAssistantPermission.value === "group"
     && item.data.codexConfig?.homeAssistantPermission !== "group";
   if (enablingGroupHomeAccess && !window.confirm("开启全群家居权限后，本群所有成员都能请求控制已开放的设备并让小爱音箱说话。不会开放 HA 账号或系统设置，其他群不受影响。确认开启吗？")) return;
+  settingsSavingKey = item.key;
   els.saveAgentSettingsButton.disabled = true;
   els.saveAgentSettingsButton.textContent = "保存中…";
   els.agentSettingsStatus.textContent = "正在保存";
@@ -1241,9 +1338,11 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
     const response = await api(`/api/qq/${segment}/${encodeURIComponent(item.data.targetId)}/config`, {
       method: "POST",
       body: JSON.stringify({
-        model: els.agentModel.value,
-        reasoningEffort: els.agentReasoningEffort.value,
-        contextTokenLimit: els.agentContextTokenLimit.value === "auto" ? "auto" : Number(els.agentContextTokenLimit.value),
+        ...(!item.data.contextLink ? {
+          model: els.agentModel.value,
+          reasoningEffort: els.agentReasoningEffort.value,
+          contextTokenLimit: els.agentContextTokenLimit.value === "auto" ? "auto" : Number(els.agentContextTokenLimit.value)
+        } : {}),
         permissionMode: els.agentPermissionMode.value,
         calendarRemindersEnabled: els.agentCalendarRemindersEnabled.checked,
         homeAssistantPermission: els.agentHomeAssistantPermission.value,
@@ -1251,18 +1350,22 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
       })
     });
     item.data.codexConfig = response.codexConfig;
-    settingsDirty = false;
-    settingsSignature = "";
-    els.agentSettingsStatus.textContent = "已保存；家居权限立即生效，其他参数下轮生效。当前 thread 保持不变。";
-    renderAgentSettings(item);
+    if (currentTarget()?.key === item.key) {
+      settingsDirty = false;
+      settingsSignature = "";
+      els.agentSettingsStatus.textContent = "已保存；家居权限立即生效，其他参数下轮生效。当前 thread 保持不变。";
+    }
     scheduleRefresh();
   } catch (error) {
-    els.agentSettingsStatus.textContent = error.message;
-    els.agentSettingsStatus.className = "form-status error";
-    settingsDirty = true;
+    if (currentTarget()?.key === item.key) {
+      els.agentSettingsStatus.textContent = error.message;
+      els.agentSettingsStatus.className = "form-status error";
+      settingsDirty = true;
+    }
   } finally {
+    settingsSavingKey = "";
     els.saveAgentSettingsButton.textContent = "保存会话参数";
-    els.saveAgentSettingsButton.disabled = !settingsDirty;
+    renderAgentSettings(currentTarget());
   }
 });
 els.personaNameInput.addEventListener("input", () => {

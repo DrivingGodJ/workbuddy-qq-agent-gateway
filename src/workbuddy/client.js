@@ -76,7 +76,7 @@ function normalizeModel(model) {
 // Unknown tools are deliberately not replay-safe, including Bash and subagents.
 const REPLAY_SAFE_TOOLS = new Set([
   "Read", "Glob", "Grep", "WebFetch", "WebSearch", "ToolSearch",
-  ...["read_messages", "read_source_messages", "read_forward_messages", "read_link",
+  ...["read_messages", "read_context_messages", "read_source_messages", "read_forward_messages", "read_link",
     "list_reactions", "read_qzone_feeds", "get_group_management", "read_home_devices",
     "wait_for_messages", "end_conversation"].map((name) => `mcp__qq_gateway__${name}`)
 ]);

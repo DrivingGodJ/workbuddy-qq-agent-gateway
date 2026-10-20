@@ -562,6 +562,10 @@ h2 { font-size: 17px; line-height: 1.25; letter-spacing: -0.015em; }
   white-space: nowrap;
 }
 .agent-settings-form { gap: 9px; }
+.context-link-form { margin-bottom: 9px; }
+.shared-context-info { margin: 0 0 9px; padding: 9px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--muted); background: var(--surface); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.context-link-form .field-note, .context-link-form .form-status { margin: 0; }
+.agent-settings-form.context-link-form .field-note { color: var(--muted); font-size: 11px; line-height: 1.55; }
 .agent-settings-form label { font-size: 11px; }
 .agent-settings-form select { min-height: 38px; font-size: 11px; }
 .agent-settings-form select:disabled { color: #7d8993; background: #0d1115; cursor: not-allowed; opacity: 0.72; }

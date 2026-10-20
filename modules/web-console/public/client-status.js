@@ -16,6 +16,19 @@ export function speakerGreetingStatus(activity = {}) {
   return states[activity.stage] || { short: "定时问候", detail: "等待下一次已开启的问候时间", tone: "idle" };
 }
 
+export function sharedContextStatus(data = {}) {
+  const queue = data.contextQueue;
+  if (!queue) return null;
+  const targetType = data.targetType || (data.userId ? "private" : "group");
+  const targetId = String(data.targetId || data.userId || data.groupId || "");
+  const isCurrent = (task) => task?.targetType === targetType && String(task.targetId) === targetId;
+  if (isCurrent(queue.active)) return null;
+  const position = (queue.queued || []).findIndex(isCurrent);
+  if (position >= 0) return { short: "共享排队", detail: `共享上下文队列 · 第 ${position + 1} 个等待任务，按激活顺序处理；消息仍保留`, tone: "pending" };
+  if (queue.active) return { short: "共享处理中", detail: `共享上下文正在处理${queue.active.targetType === "private" ? "私聊" : "群聊"}任务 · 当前渠道消息独立保留`, tone: "pending" };
+  return null;
+}
+
 export function conversationStatus(data, state = {}, now = Date.now()) {
   const active = data?.activeReply || {};
   const diagnostics = data?.diagnostics;
@@ -23,6 +36,8 @@ export function conversationStatus(data, state = {}, now = Date.now()) {
   const waitingModel = ["prompt_sent", "waiting_model"].includes(stage);
   if (data?.replyEnabled === false) return { short: "不回复", detail: "本会话不回复 · 消息继续记录", tone: "idle" };
   if (state.agentDispatch?.enabled === false) return { short: "已暂停", detail: "总开关已暂停 · 消息继续记录", tone: "idle" };
+  const sharedStatus = sharedContextStatus(data);
+  if (sharedStatus) return sharedStatus;
   if (active.uploading) return { short: "上传中", detail: active.text || "QQ 正在上传文件", tone: "running" };
   if (stage === "recovering") return { short: "恢复中", detail: "本轮无进展且未尝试外部操作 · 正在原会话中自动恢复一次，消息仍保留", tone: "running" };
   if (stage === "compacting") return { short: "压缩中", detail: "正在压缩上下文 · 最多等待六分钟，不是 QQ 发送中", tone: "running" };

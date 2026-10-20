@@ -20,6 +20,8 @@ import { QqMediaManager } from "./qq/media-manager.js";
 import { QqStickerStore } from "./qq/sticker-store.js";
 import { EphemeralStickerLabeler } from "./qq/sticker-labeler.js";
 import { AgentTaskGate } from "./qq/agent-task-gate.js";
+import { SharedContexts } from "./qq/shared-contexts.js";
+import { createSharedContextReader } from "./qq/shared-context-reader.js";
 import { TargetUpdateStream } from "./qq/target-update-stream.js";
 import { removeGatewayTarget, targetBusyForRemoval } from "./qq/target-removal.js";
 import { EphemeralStickerCurator, StickerCurationCoordinator } from "./qq/sticker-curator.js";
@@ -303,10 +305,23 @@ await stickerLabeler.init();
 const sseClients = new Set();
 const recentEvents = [];
 const removingTargets = new Set();
+const contextLinkChanges = new Set();
 const targetUpdateStream = new TargetUpdateStream({ emit: publishTargetUpdate });
 const triggerManager = new TriggerManager({ store, allowedGroups, periodicMinutes: periodicTriggerMinutes });
 const privateTriggerManager = new TriggerManager({ store: privateStore, allowedGroups: null });
 const taskGate = new AgentTaskGate();
+let sharedContextsReady = false;
+const sharedContexts = new SharedContexts({
+  filePath: join(dataDir, "context-links.json"), groupStore: store, privateStore,
+  groupWorkspace: (id) => join(groupWorkspaceRoot, String(id)),
+  onChange: () => { if (sharedContextsReady) broadcast({ type: "context-queue", state: publicState() }); },
+  onIdle: resumeSharedContextTarget
+});
+await sharedContexts.init();
+for (const [id, groupId] of Object.entries(sharedContexts.state.privateGroups)) {
+  if (!allowedGroups.includes(groupId) || !privateStore.listGroups().some((item) => item.groupId === id)
+    || targetAllowlist.isRemoved("private", id)) throw new Error("共享上下文指向未启用的群或私聊，请先修正 context-links.json");
+}
 const homeAssistant = new HomeAssistantClient({
   enabled: process.env.CODEX_REMOTE_CONTACT_HA_ENABLED === "1",
   baseUrl: process.env.CODEX_REMOTE_CONTACT_HA_BASE_URL || "",
@@ -328,7 +343,8 @@ const worker = new GroupWorker({
   targetNameResolver: (groupId) => groupMetadata[groupId]?.groupName || null,
   sharedWorkspaceRoot: groupWorkspaceRoot,
   taskGate,
-  canRun: (id) => agentDispatchStore.isEnabled() && allowedGroups.includes(String(id)) && !removingTargets.has(`group:${id}`),
+  canRun: (id) => agentDispatchStore.isEnabled() && allowedGroups.includes(String(id)) && !removingTargets.has(`group:${id}`)
+    && !contextLinkChanges.has(`group:${id}`) && !sharedContexts.isCancelled("group", id),
   onEvent: recordEvent
 });
 const privateWorker = new PrivateWorker({
@@ -336,9 +352,20 @@ const privateWorker = new PrivateWorker({
   homeAssistant,
   targetNameResolver: (userId) => privateMetadata[userId]?.displayName || null,
   taskGate,
-  canRun: (id) => agentDispatchStore.isEnabled() && !targetAllowlist.isRemoved("private", id) && !removingTargets.has(`private:${id}`),
+  canRun: (id) => agentDispatchStore.isEnabled() && !targetAllowlist.isRemoved("private", id) && !removingTargets.has(`private:${id}`)
+    && !contextLinkChanges.has(`private:${id}`) && !sharedContexts.isCancelled("private", id),
   onEvent: recordEvent
 });
+for (const targetWorker of [worker, privateWorker]) {
+  targetWorker.sharedContexts = sharedContexts;
+  targetWorker.readSharedContextFor = (targetType, targetId) => createSharedContextReader({
+    sharedContexts, groupStore: store, privateStore, targetType, targetId,
+    groupNameResolver: (id) => groupMetadata[id]?.groupName,
+    privateNameResolver: (id) => privateMetadata[id]?.displayName,
+    canRead: (type, id) => targetWorker.canRun(targetId) && (type === "group"
+      ? allowedGroups.includes(id) : privateStore.listGroups().some((item) => item.groupId === id) && !targetAllowlist.isRemoved("private", id))
+  });
+}
 const qzone = new QzoneCoordinator({
   store: qzoneStore, oneBot, fileManager, groupStore: store, privateStore,
   groupWorker: worker, privateWorker, scheduleTimes: qzoneScheduleTimes,
@@ -369,7 +396,6 @@ await stickerCuration.init();
 triggerManager.setWorker(worker);
 privateTriggerManager.setWorker(privateWorker);
 triggerManager.start();
-qzone.start();
 
 const threadReservations = new ThreadReservationManager({
   codex,
@@ -378,6 +404,8 @@ const threadReservations = new ThreadReservationManager({
   onChange: () => broadcast({ type: "thread-reservations", state: publicState() })
 });
 await threadReservations.start();
+sharedContextsReady = true;
+qzone.start();
 stickerCuration.start();
 dailyStyle.start();
 speakerGreetings.start();
@@ -399,6 +427,7 @@ const recoveredRateLimitWindows = new Map();
 const subscriptionTimer = setInterval(() => {
   checkSubscriptionSchedule().catch((error) => console.warn(`Subscription scheduler failed: ${error.message}`));
   checkRateLimitRecovery().catch((error) => console.warn(`Model quota recovery failed: ${error.message}`));
+  checkSharedContextFollowups().catch((error) => console.warn(`Shared context followup failed: ${error.message}`));
 }, 2000);
 subscriptionTimer.unref?.();
 await checkSubscriptionSchedule();
@@ -457,7 +486,8 @@ async function handleApi(req, res, url) {
     const id = diagnosticsMatch[2];
     assertTarget(type, id);
     const conversation = (type === "private" ? privateStore : store).snapshot(id);
-    sendJson(res, 200, { diagnostics: codex.diagnostics?.snapshot(conversation.threadId, { includeInput: true }) || null });
+    const shared = sharedContexts.contextFor(type, id);
+    sendJson(res, 200, { diagnostics: codex.diagnostics?.snapshot(shared ? shared.group.threadId : conversation.threadId, { includeInput: true }) || null });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/qq/persona/name") {
@@ -651,6 +681,43 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, { targetType, targetId, replyEnabled: body.enabled });
     return;
   }
+  const contextLinkAction = /^\/api\/qq\/private\/(\d+)\/context-link$/u.exec(url.pathname);
+  if (req.method === "POST" && contextLinkAction) {
+    const id = validateQqId(contextLinkAction[1], "Private QQ id");
+    assertTarget("private", id);
+    if (!privateStore.listGroups().some((item) => item.groupId === id)) throw new HttpError(404, "请先将私聊加入网关");
+    const body = parseJson(rawBody);
+    if (!Object.hasOwn(body, "groupId")) throw new HttpError(400, "请选择目标群，或用 null 恢复独立私聊");
+    const groupId = body.groupId === null ? null : validateQqId(body.groupId, "Group QQ id");
+    if (groupId) assertTarget("group", groupId);
+    const previous = sharedContexts.groupFor("private", id);
+    if (previous !== groupId) {
+      if (body.acknowledgeSharedContext !== true) throw new HttpError(400, "请确认共享模型上下文和群工作区；解绑不会抹除已共享的内容");
+      const members = new Map(contextMembers("private", id).map((item) => [`${item.type}:${item.id}`, item]));
+      if (groupId) for (const item of contextMembers("group", groupId)) members.set(`${item.type}:${item.id}`, item);
+      for (const item of members.values()) {
+        if (contextBusy(item.type, item.id)) throw new HttpError(409, "相关会话仍在运行、接话或排队，请先终止或等待结束再更改关联");
+      }
+      for (const key of members.keys()) contextLinkChanges.add(key);
+      const previousCursor = privateStore.snapshot(id);
+      try {
+        // The new model context has not seen retained private messages. Replay
+        // only this small pending window, never copy the parked transcript.
+        await privateStore.resetReadCursor(id);
+        sharedContexts.setPrivateGroup(id, groupId);
+      } catch (error) {
+        // A failed mapping save must not replay the old context's read messages.
+        await privateStore.setReadCursor(id, previousCursor).catch(() => {});
+        throw error;
+      } finally {
+        for (const key of members.keys()) contextLinkChanges.delete(key);
+        for (const item of members.values()) resumeSharedContextTarget(item.type, item.id);
+      }
+      recordEvent({ type: "context-link-updated", targetType: "private", targetId: id, groupId, at: new Date().toISOString() });
+    }
+    sendJson(res, 200, { status: "updated", contextLink: contextLinkView(id), contextQueue: sharedContexts.snapshot("private", id) });
+    return;
+  }
   const targetConfig = url.pathname.match(/^\/api\/qq\/(groups|private)\/([^/]+)\/config$/);
   if (req.method === "POST" && targetConfig) {
     const targetType = targetConfig[1] === "private" ? "private" : "group";
@@ -658,9 +725,13 @@ async function handleApi(req, res, url) {
     assertTarget(targetType, targetId);
     const targetStore = targetType === "private" ? privateStore : store;
     const conversation = targetStore.snapshot(targetId);
-    if (conversation.busy || targetBusyForRemoval(targetType === "private" ? privateWorker : worker, conversation,
+    if (contextBusy(targetType, targetId) || conversation.busy || targetBusyForRemoval(targetType === "private" ? privateWorker : worker, conversation,
       speakerGreetingBusy(targetType, targetId))) throw new HttpError(409, "会话仍有进行中或排队的任务，请结束后再修改设置");
-    const config = validateCodexConfig(parseJson(rawBody), { targetType, currentConfig: conversation.codexConfig });
+    const input = parseJson(rawBody);
+    if (targetType === "private" && sharedContexts.groupFor(targetType, targetId)) {
+      for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) input[key] = conversation.codexConfig?.[key];
+    }
+    const config = validateCodexConfig(input, { targetType, currentConfig: conversation.codexConfig });
     const saved = await targetStore.setCodexConfig(targetId, config);
     if (saved.model !== conversation.codexConfig.model) {
       const restoredSubscriptions = await subscriptionStore.retryRateLimitedForTarget(targetType, targetId);
@@ -677,6 +748,9 @@ async function handleApi(req, res, url) {
     const targetType = targetAction[1] === "private" ? "private" : "group";
     const targetId = decodeURIComponent(targetAction[2]);
     assertTarget(targetType, targetId);
+    if (targetAction[3] === "reset" && targetType === "private" && sharedContexts.groupFor("private", targetId)) {
+      throw new HttpError(409, "私聊正在共享群上下文，请先解除关联；群会话重置须在对应群操作");
+    }
     if (targetAction[3] === "retry") {
       const failedSubscriptions = await subscriptionStore.retryFailedForTarget(targetType, targetId);
       if (failedSubscriptions > 0) {
@@ -695,6 +769,8 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && deleteTarget) {
     const type = deleteTarget[1] === "private" ? "private" : "group";
     const id = validateQqId(deleteTarget[2], "Target QQ id");
+    if (contextLinkChanges.has(`${type}:${id}`)) throw new HttpError(409, "该会话正在更改共享上下文，请稍后再删除");
+    if (sharedContexts.groupFor(type, id)) throw new HttpError(409, "请先解除该会话的共享上下文关联，再删除会话");
     const body = parseJson(rawBody);
     if (String(body.confirmTargetId || "") !== id) throw new HttpError(400, "请确认要删除的会话 QQ 号或群号");
     const key = `${type}:${id}`;
@@ -1119,6 +1195,54 @@ async function appendUiOwnerMessage(targetType, targetId, text) {
   return message;
 }
 
+function contextMembers(type, id) {
+  const groupId = sharedContexts.groupFor(type, id);
+  return groupId ? [{ type: "group", id: groupId },
+    ...sharedContexts.linkedPrivates(groupId).map((id) => ({ type: "private", id }))] : [{ type, id: String(id) }];
+}
+
+function contextBusy(type, id) {
+  if (sharedContexts.busy(type, id)) return true;
+  return contextMembers(type, id).some((item) => {
+    const targetStore = item.type === "private" ? privateStore : store;
+    const conversation = targetStore.listGroups().find((state) => state.groupId === item.id);
+    return contextLinkChanges.has(`${item.type}:${item.id}`) || targetBusyForRemoval(
+      item.type === "private" ? privateWorker : worker, conversation,
+      qzone.activityFor(item.type, item.id) || speakerGreetingBusy(item.type, item.id))
+      || Date.parse(conversation?.replyFollowup?.expiresAt) > Date.now();
+  });
+}
+
+function contextLinkView(id) {
+  const linked = sharedContexts.contextFor("private", id);
+  return linked ? {
+    groupId: linked.groupId, groupName: groupMetadata[linked.groupId]?.groupName || null,
+    threadId: linked.group.threadId || null, parkedThreadId: privateStore.snapshot(id).threadId || null
+  } : null;
+}
+
+function resumeSharedContextTarget(type, id) {
+  const targetWorker = type === "private" ? privateWorker : worker;
+  sharedContexts.settleTarget(type, id, targetWorker);
+}
+
+async function checkSharedContextFollowups() {
+  const members = new Map(Object.entries(sharedContexts.state.privateGroups).flatMap(([id, groupId]) => [
+    [`group:${groupId}`, { type: "group", id: groupId }], [`private:${id}`, { type: "private", id }]
+  ]));
+  for (const item of members.values()) {
+    const targetWorker = item.type === "private" ? privateWorker : worker;
+    const targetStore = item.type === "private" ? privateStore : store;
+    const lane = sharedContexts.snapshot(item.type, item.id);
+    if (targetWorker.running.has(item.id) || [lane?.active, ...(lane?.queued || [])].some((task) => task?.targetType === item.type && task?.targetId === item.id)) continue;
+    const conversation = targetStore.snapshot(item.id);
+    if (Date.parse(conversation.replyFollowup?.expiresAt) <= Date.now()) await targetStore.cancelReplyFollowup(item.id);
+    if (conversation.replyFollowup || ["waiting", "queued"].includes(targetWorker.live.get(item.id)?.status)) {
+      resumeSharedContextTarget(item.type, item.id);
+    }
+  }
+}
+
 function publicState() {
   const liveByGroup = worker.publicLiveState();
   const liveByPrivate = privateWorker.publicLiveState();
@@ -1126,6 +1250,7 @@ function publicState() {
     const view = toPublicGroupState(group, liveByGroup[group.groupId], groupMetadata[group.groupId]);
     return [group.groupId, {
       ...view,
+      contextQueue: sharedContexts.snapshot("group", group.groupId),
       diagnostics: codex.diagnostics?.snapshot(group.threadId) || null,
       qzoneActivity: qzone.activityFor("group", group.groupId),
       speakerGreetingActivity: speakerGreetings.activityFor("group", group.groupId),
@@ -1139,9 +1264,18 @@ function publicState() {
   const privateChats = Object.fromEntries(privateStore.listGroups().filter((item) => !targetAllowlist.isRemoved("private",item.groupId)).map((conversation) => {
     const metadata = privateMetadata[conversation.groupId] || {};
     const view = toPublicGroupState(conversation, liveByPrivate[conversation.groupId], { groupName: metadata.displayName || null });
+    const contextLink = contextLinkView(conversation.groupId);
+    const threadId = contextLink ? contextLink.threadId : conversation.threadId;
+    const effectiveCodexConfig = contextLink ? {
+      ...conversation.codexConfig,
+      ...Object.fromEntries(["model", "reasoningEffort", "contextTokenLimit"].map((key) => [key, store.snapshot(contextLink.groupId).codexConfig?.[key]]))
+    } : conversation.codexConfig;
     return [conversation.groupId, {
       ...view,
-      diagnostics: codex.diagnostics?.snapshot(conversation.threadId) || null,
+      threadId, contextLink, effectiveCodexConfig,
+      threadCreatedAt: contextLink ? store.snapshot(contextLink.groupId).threadCreatedAt : conversation.threadCreatedAt,
+      contextQueue: sharedContexts.snapshot("private", conversation.groupId),
+      diagnostics: codex.diagnostics?.snapshot(threadId) || null,
       qzoneActivity: qzone.activityFor("private", conversation.groupId),
       speakerGreetingActivity: speakerGreetings.activityFor("private", conversation.groupId),
       userId: conversation.groupId,
@@ -1149,7 +1283,7 @@ function publicState() {
       targetType: "private",
       targetId: conversation.groupId,
       conversationType: "PRIVATE_AGENT_CHAT",
-      threadLock: threadReservations.stateFor("private", conversation.groupId, conversation.threadId),
+      threadLock: threadReservations.stateFor("private", conversation.groupId, threadId),
       subscriptions: subscriptionStore.listSubscriptions({ targetType: "private", targetId: conversation.groupId })
     }];
   }));
@@ -1432,16 +1566,17 @@ function reservationTargets() {
 }
 
 function reservationTarget(targetType, conversation) {
-  const config = conversation.codexConfig || defaultCodexConfig;
+  const shared = sharedContexts.contextFor(targetType, conversation.groupId);
+  const config = shared?.group.codexConfig || conversation.codexConfig || defaultCodexConfig;
   return {
     targetType,
     targetId: conversation.groupId,
-    threadId: conversation.threadId,
+    threadId: shared ? shared.group.threadId : conversation.threadId,
     model: config.model || codexModel,
     effort: config.reasoningEffort || codexEffort,
     contextTokenLimit: config.contextTokenLimit || codexAutoCompactTokenLimit || 200_000,
     workingMode: "agent",
-    cwd: targetType === "group"
+    cwd: shared ? shared.cwd : targetType === "group"
       ? join(groupWorkspaceRoot, String(conversation.groupId))
       : projectDir
   };

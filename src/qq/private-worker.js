@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import {
   baseThreadInstructions,
   buildMcpTurnPrompt,
@@ -9,6 +10,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "./file-directive.js";
 import { createLiveConversationTools } from "./live-conversation.js";
+import { sharedContextLabel } from "./shared-context-reader.js";
 import { conversationReadSequence } from "../groups/group-state.js";
 import { runConversationTurn } from "./conversation-turn.js";
 import { QqMessageReader } from "./message-reader.js";
@@ -51,7 +53,7 @@ export class PrivateWorker {
     this.live = new Map();
     this.followup = new ConversationFollowup({ store, targetType: "private", durationMs: followupDurationMs,
       canRun: (id) => this.canRun(id), blocked: () => Boolean(this.taskGate?.blocked),
-      shouldYield: (id) => this.qzoneReservations.has(String(id)),
+      shouldYield: (id) => this.qzoneReservations.has(String(id)) || this.sharedContexts?.shouldYield("private", id),
       setLive: (id, patch) => this.setLive(id, patch), onEvent });
     this.stickerLabels = new StickerLabelCoordinator({
       targetType: "private",
@@ -74,7 +76,35 @@ export class PrivateWorker {
     return `private:${userId}`;
   }
 
+  threadContext(userId) {
+    const conversation = this.store.snapshot(userId);
+    const shared = this.sharedContexts?.contextFor("private", userId);
+    const session = shared?.group || conversation;
+    const config = { ...conversation.codexConfig };
+    if (shared) for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) config[key] = session.codexConfig?.[key];
+    return {
+      conversation, session, cwd: shared?.cwd || null,
+      store: shared ? this.sharedContexts.groupStore : this.store,
+      id: shared?.groupId || String(userId),
+      options: optionsForConversation({ ...conversation, codexConfig: config })
+    };
+  }
+
+  async markThreadBootstrap(userId, compacted) {
+    const thread = this.threadContext(userId);
+    return compacted ? thread.store.markBootstrapRequired(thread.id)
+      : thread.store.markBootstrapComplete(thread.id, THREAD_INSTRUCTIONS_REVISION);
+  }
+
   kick(userId) {
+    if (!this.canRun(String(userId))) return Promise.resolve();
+    if (this.sharedContexts?.groupFor("private", userId)) {
+      return this.sharedContexts.run("private", userId, "chat", () => this.kickLocal(userId));
+    }
+    return this.kickLocal(userId);
+  }
+
+  kickLocal(userId) {
     const id = String(userId);
     if (!this.canRun(id)) return Promise.resolve();
     if (this.store.rateLimitUntil(id) > Date.now()) return Promise.resolve();
@@ -85,7 +115,7 @@ export class PrivateWorker {
     if (this.running.has(id)) return this.running.get(id);
     if (this.taskGate?.blocked) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
-      const waiting = this.taskGate.wait().then(() => this.kick(id)).finally(() => {
+      const waiting = this.taskGate.wait().then(() => this.kickLocal(id)).finally(() => {
         if (this.waitingChat.get(id) === waiting) this.waitingChat.delete(id);
       });
       this.waitingChat.set(id, waiting);
@@ -94,7 +124,7 @@ export class PrivateWorker {
     const stickerCommit = this.stickerLabels.waitForCommit(id);
     if (stickerCommit) {
       if (this.waitingChat.has(id)) return this.waitingChat.get(id);
-      const waiting = stickerCommit.finally(() => this.kick(id)).finally(() => {
+      const waiting = stickerCommit.finally(() => this.kickLocal(id)).finally(() => {
         if (this.waitingChat.get(id) === waiting) this.waitingChat.delete(id);
       });
       this.waitingChat.set(id, waiting);
@@ -123,7 +153,7 @@ export class PrivateWorker {
     const waiting = previous.then(() => {
       if (this.qzoneReservations.get(id) === reservation) this.qzoneReservations.delete(id);
       else this.olderChatPermits.add(id);
-      return this.kick(id);
+      return this.kickLocal(id);
     }).finally(() => {
       this.olderChatPermits.delete(id);
       if (this.queuedChat.get(id) === waiting) this.queuedChat.delete(id);
@@ -135,6 +165,7 @@ export class PrivateWorker {
   }
 
   async runLoop(userId) {
+    let processed = false;
     for (;;) {
       if (!this.canRun(userId)) {
         if (this.store.snapshot(userId).replyFollowup) await this.followup.cancel(userId);
@@ -142,6 +173,7 @@ export class PrivateWorker {
         return;
       }
       if (this.followup.cancelled.has(String(userId))) return;
+      if (processed && this.sharedContexts?.shouldYield("private", userId)) return;
       if (this.taskGate?.blocked) {
         if (this.store.snapshot(userId).replyFollowup) this.followup.publishQueued(userId);
         return;
@@ -184,26 +216,34 @@ export class PrivateWorker {
         await this.triggerManager.request(userId, "subscription_auto", {});
       }
       await this.triggerManager.reconsiderPending(userId);
+      processed = true;
     }
   }
 
   async runQzoneTurn(userId, prompt, { trigger = "qzone", qqToolContext = null } = {}) {
+    if (this.sharedContexts?.groupFor("private", userId)) {
+      return this.sharedContexts.run("private", userId, trigger, () => this.runQzoneTurnLocal(userId, prompt, { trigger, qqToolContext }));
+    }
+    return this.runQzoneTurnLocal(userId, prompt, { trigger, qqToolContext });
+  }
+
+  async runQzoneTurnLocal(userId, prompt, { trigger = "qzone", qqToolContext = null } = {}) {
     const id = String(userId);
     if (!this.canRun(id)) throw new Error("当前私聊会话或 Agent 总开关已关闭");
     const reservation = this.qzoneReservations.get(id);
     if (reservation) {
       await reservation;
-      return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+      return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     }
     const active = this.running.get(id);
     if (active) await active.catch(() => {});
-    if (this.running.has(id) || this.qzoneReservations.has(id)) return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+    if (this.running.has(id) || this.qzoneReservations.has(id)) return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     const committing = this.stickerLabels.waitForCommit(id);
     if (committing) {
       await committing;
-      return this.runQzoneTurn(id, prompt, { trigger, qqToolContext });
+      return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext });
     }
-    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.runQzoneTurn(id, prompt, { trigger, qqToolContext }); }
+    if (this.taskGate?.blocked) { await this.taskGate.wait(); return this.runQzoneTurnLocal(id, prompt, { trigger, qqToolContext }); }
     const release = this.taskGate?.tryEnter();
     const run = this.performQzoneTurn(id, prompt, trigger, qqToolContext).finally(() => {
       this.running.delete(id);
@@ -215,6 +255,13 @@ export class PrivateWorker {
   }
 
   async runQzoneSequence(userId, task) {
+    if (this.sharedContexts?.groupFor("private", userId)) {
+      return this.sharedContexts.run("private", userId, "qzone", () => this.runQzoneSequenceLocal(userId, task));
+    }
+    return this.runQzoneSequenceLocal(userId, task);
+  }
+
+  async runQzoneSequenceLocal(userId, task) {
     const id = String(userId);
     const previous = this.qzoneReservations.get(id);
     if (!previous && !this.running.has(id) && this.store.snapshot(id).pendingTrigger) this.kick(id);
@@ -253,21 +300,24 @@ export class PrivateWorker {
   }
 
   async performQzoneTurn(userId, prompt, trigger, qqToolContext = null) {
-    let conversation = this.store.snapshot(userId);
-    const options = optionsForConversation(conversation);
+    const thread = this.threadContext(userId);
+    let conversation = thread.session;
+    const options = thread.options;
+    if (thread.cwd) await mkdir(thread.cwd, { recursive: true });
     const scheduledSandbox = trigger === "speaker-greeting" ? "readOnly" : qqToolContext && this.codex?.supportsQqMcp
       ? options.permissionMode
       : "readOnly";
     let threadId = conversation.threadId;
     if (!threadId) {
-      threadId = await this.codex.startThread({ ...options, workingMode: "agent", threadSandbox: scheduledSandbox });
-      await this.store.setThread(userId, threadId, { bootstrapComplete: false });
-      conversation = this.store.snapshot(userId);
+      threadId = await this.codex.startThread({ ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
+      await thread.store.setThread(thread.id, threadId, { bootstrapComplete: false });
+      conversation = thread.store.snapshot(thread.id);
     } else {
-      await this.codex.resumeThread(threadId, { ...options, workingMode: "agent", threadSandbox: scheduledSandbox });
+      await this.codex.resumeThread(threadId, { ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
     }
     const includeBase = !conversation.bootstrapComplete || conversation.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
     let qzonePrompt = [
+      sharedContextLabel(this.sharedContexts, "private", userId),
       ...(includeBase && !this.codex.supportsSystemPrompt ? [`本持久会话固定说明：\n${baseThreadInstructions()}`] : []),
       prompt
     ].filter(Boolean).join("\n\n");
@@ -287,16 +337,15 @@ export class PrivateWorker {
         groupId: this.codexKey(userId), threadId,
         prompt: qzonePrompt,
         imagePaths: [], model: options.model, effort: options.effort,
-        contextTokenLimit: options.contextTokenLimit, workingMode: "agent",
+        contextTokenLimit: options.contextTokenLimit, workingMode: "agent", cwd: thread.cwd || undefined,
         qqToolContext: qqToolContext || (trigger === "qzone-post" ? { targetType: "private", allowQzonePost: true, scheduledQzonePost: true } : null),
         turnSandbox: { type: scheduledSandbox }
       });
-      if (result.compacted) await this.store.markBootstrapRequired(userId);
-      else await this.store.markBootstrapComplete(userId, THREAD_INSTRUCTIONS_REVISION);
+      await this.markThreadBootstrap(userId, result.compacted);
       this.setLive(userId, { status: "idle", threadId, trigger: null, text: "", error: null });
       return result;
     } catch (error) {
-      if (error?.contextCompacted) await this.store.markBootstrapRequired(userId).catch(() => {});
+      if (error?.contextCompacted) await this.markThreadBootstrap(userId, true).catch(() => {});
       this.setLive(userId, { status: "error", threadId, trigger: null, text: "", error: error.message });
       throw error;
     }
@@ -313,6 +362,7 @@ export class PrivateWorker {
       initialImageSequence: Number(conversation.pendingMessages.at(-1)?.sequence || 0),
       stickers: this.stickerManager?.promptCatalog() || [],
       canRun: () => this.canRun(userId), onEvent: this.onEvent,
+      readSharedContext: this.readSharedContextFor?.("private", userId),
       renderMessages: (messages, { snapshot }) => buildPrivateTurnPrompt(messages, [], {
         userId, displayName: this.targetNameResolver(userId), security,
         compact: true, includePermissionNotice: false,
@@ -348,28 +398,32 @@ export class PrivateWorker {
         this.setLive(userId, { status: "idle", text: "", error: null });
         return;
       }
-      let conversation = this.store.snapshot(userId);
-      let threadId = conversation.threadId;
-      const codexOptions = optionsForConversation(conversation);
+      const thread = this.threadContext(userId);
+      const conversation = thread.conversation;
+      let session = thread.session;
+      let threadId = session.threadId;
+      const codexOptions = thread.options;
       const sourceViaMcp = autoSubscriptionTurn && this.codex.supportsQqMcp === true;
       const turnOptions = codexOptions;
       const security = constrainConversationSecurity(privateSandbox(userId, work.trigger), codexOptions);
+      const threadCwd = thread.cwd || security.cwd;
+      if (thread.cwd) await mkdir(thread.cwd, { recursive: true });
       if (!threadId) {
-        threadId = await this.codex.startThread({ ...turnOptions, cwd: security.cwd, threadSandbox: security.threadSandbox });
-        await this.store.setThread(userId, threadId, { bootstrapComplete: false });
-        conversation = this.store.snapshot(userId);
+        threadId = await this.codex.startThread({ ...turnOptions, cwd: threadCwd, threadSandbox: security.threadSandbox });
+        await thread.store.setThread(thread.id, threadId, { bootstrapComplete: false });
+        session = thread.store.snapshot(thread.id);
         this.onEvent({ type: "private-thread-created", userId, threadId, at: new Date().toISOString() });
       } else {
         try {
-          await this.codex.resumeThread(threadId, { ...security, ...turnOptions });
+          await this.codex.resumeThread(threadId, { ...security, ...turnOptions, cwd: threadCwd });
         } catch (error) {
           await this.store.noteResumeError(userId, error);
           throw error;
         }
       }
 
-      const includeBaseInstructions = !conversation.bootstrapComplete
-        || conversation.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
+      const includeBaseInstructions = !session.bootstrapComplete
+        || session.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
       // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
       const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
       const inputMessages = useMcpRead
@@ -431,12 +485,14 @@ export class PrivateWorker {
         store: this.store, targetId: userId, targetType: "private", oneBot: this.oneBot,
         fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
         homeAssistant: this.homeAssistant,
+        readSharedContext: this.readSharedContextFor?.("private", userId),
         canRun: () => this.canRun(userId),
         trigger: work.trigger, triggerMessages: inputMessages, security,
         initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),
         stickers: this.stickerManager?.promptCatalog() || [],
         readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
         renderMessages: (messages, { first, activeMessages }) => [
+          first ? sharedContextLabel(this.sharedContexts, "private", userId) : "",
           buildPrivateTurnPrompt(messages, first ? contexts : [], {
             userId, displayName: this.targetNameResolver(userId), security,
             includeBaseInstructions: false, includeResponseInstruction: false, stickerCatalog: [],
@@ -465,6 +521,7 @@ export class PrivateWorker {
         model: codexOptions.model,
         effort: codexOptions.effort,
         contextTokenLimit: codexOptions.contextTokenLimit,
+        cwd: threadCwd,
         workingMode: turnOptions.workingMode,
         outputSchema: autoSubscriptionTurn ? autoSubscriptionOutputSchema() : null,
         qqToolContext,
@@ -482,6 +539,7 @@ export class PrivateWorker {
         onRecovery: () => this.onEvent({ type: "private-send-tool-recovery", userId, threadId, at: new Date().toISOString() })
       });
       const result = autoTurn.result;
+      if (thread.store !== this.store) await this.markThreadBootstrap(userId, result.compacted);
 
       this.store.assertReplyEnabled(userId);
       if (useMcpRead) {
@@ -599,7 +657,7 @@ export class PrivateWorker {
         at: new Date().toISOString()
       });
     } catch (error) {
-      if (error?.contextCompacted) await this.store.markBootstrapRequired(userId).catch(() => {});
+      if (error?.contextCompacted) await this.markThreadBootstrap(userId, true).catch(() => {});
       if (!deliveryPrepared && !claimsCompleted && this.subscriptionStore && contexts.length) {
         if (this.store.snapshot(userId).replyEnabled === false || this.store.snapshot(userId).processing?.invalidatedByRecall || ["REPLY_DISABLED", "RECALLED_INPUT"].includes(error.code)) await this.subscriptionStore.releaseClaims(contexts).catch(() => {});
         else await this.subscriptionStore.failClaims(contexts, error).catch(() => {});
@@ -681,6 +739,14 @@ export class PrivateWorker {
       return;
     }
     if (command === "reset") {
+      if (this.sharedContexts?.groupFor("private", userId)) {
+        const reply = "本私聊正在共享群聊上下文。请先在网关解除关联再新建独立会话；群中的新建会话会重置共享上下文。原私聊会话仍保留。";
+        const sent = await this.oneBot.sendPrivateMessage(userId, reply);
+        if (!sent.ok) throw new Error("Unable to send shared-context reset notice");
+        const processed = await this.store.completeControlWork(userId, message.sequence, { reply });
+        await this.mediaManager.removeMessages(processed);
+        return;
+      }
       const codexOptions = optionsForConversation(this.store.snapshot(userId));
       const newThreadId = await this.codex.startThread(codexOptions);
       const initialized = await this.codex.runTurn({
@@ -703,10 +769,10 @@ export class PrivateWorker {
       await this.mediaManager.removeMessages(processed);
       return;
     }
-    const conversation = this.store.snapshot(userId);
+    const { session, conversation } = this.threadContext(userId);
     const reply = [
-      `threadId: ${conversation.threadId || "尚未创建"}`,
-      `创建时间: ${conversation.threadCreatedAt || "-"}`,
+      `threadId: ${session.threadId || "尚未创建"}`,
+      `创建时间: ${session.threadCreatedAt || "-"}`,
       `最近活动: ${conversation.lastActivityAt || "-"}`,
       `pendingMessages: ${Math.max(0, conversation.pendingMessages.length - 1)}`,
       `busy: ${conversation.busy}`,
@@ -719,8 +785,10 @@ export class PrivateWorker {
   }
 
   async cancel(userId) {
-    const waiting = this.running.has(String(userId));
+    const waiting = this.running.has(String(userId)) || this.sharedContexts?.busy("private", userId);
     await this.followup.cancel(userId);
+    this.sharedContexts?.cancelTarget("private", userId);
+    this.setLive(userId, { status: "cancelled", text: "", waitUntil: null });
     return await this.codex.interruptGroup(this.codexKey(userId)) || waiting;
   }
 

@@ -109,6 +109,16 @@
 
           <details id="agentSettingsDetails" class="session-details agent-settings-details">
             <summary>会话参数 <span id="agentSettingsSummary">—</span></summary>
+            <p id="sharedContextInfo" class="shared-context-info" role="status" hidden></p>
+            <form id="contextLinkForm" class="agent-settings-form context-link-form" hidden>
+              <label for="contextLinkGroup">共享群聊上下文
+                <select id="contextLinkGroup" aria-describedby="contextLinkHelp contextLinkHint"><option value="">独立私聊</option></select>
+              </label>
+              <p id="contextLinkHelp" class="field-note">绑定后共用群聊的模型上下文和工作区；群聊、私聊仍分别读取和发送，触发任务按顺序排队。原私聊会话搁置保留。</p>
+              <p id="contextLinkHint" class="field-note">解绑后恢复原私聊会话；已进入群上下文的私聊内容无法从群会话中抹除。文件、家居和通知自动化权限仍按各渠道单独设置。</p>
+              <p id="contextLinkStatus" class="form-status" role="status" aria-live="polite"></p>
+              <button id="saveContextLinkButton" class="button primary full-button" type="submit" disabled>保存上下文关联</button>
+            </form>
             <form id="agentSettingsForm" class="agent-settings-form">
               <label for="agentModel">模型
                 <select id="agentModel" required></select>

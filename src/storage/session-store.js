@@ -866,6 +866,17 @@ export class SessionStore {
     throw error;
   }
 
+  async resetReadCursor(groupId) {
+    await this.setReadCursor(groupId, {});
+  }
+
+  async setReadCursor(groupId, cursor) {
+    const group = this.ensureGroup(groupId);
+    group.deferredThroughSequence = Math.max(0, Number(cursor.deferredThroughSequence) || 0);
+    group.periodicCheckedThroughSequence = Math.max(0, Number(cursor.periodicCheckedThroughSequence) || 0);
+    await this.save();
+  }
+
   async noteResumeError(groupId, error) {
     const group = this.ensureGroup(groupId);
     group.resumeError = String(error?.message || error).slice(0, 2000);

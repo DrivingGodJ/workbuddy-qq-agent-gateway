@@ -60,7 +60,7 @@ export function createLiveConversationTools({
   trigger, triggerMessages, security, initialImageSequence, renderMessages,
   pokeSenderId = null, allowedPokeUserIds = [], stickers = [], canRun = () => true,
   readOnlyContextMessages = [], messageReader = new QqMessageReader({ oneBot }), onEvent = () => {},
-  scheduledTask = false, qzoneActions = null
+  scheduledTask = false, qzoneActions = null, readSharedContext = null
 }) {
   const context = {
     liveMode: true,
@@ -119,6 +119,11 @@ export function createLiveConversationTools({
     if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭，不能再操作 QQ。", true);
     if (context.failed) return answer("本轮发送状态有误，已停止操作；待处理消息仍保留。", true);
     if (context.ended && name !== "end_conversation") return answer("本轮对话已经结束，不能再读取或发送。", true);
+    if (name === "read_context_messages") {
+      if (!context.readCalled) return answer("请先读取当前会话消息，再查看关联渠道上下文。", true);
+      if (!readSharedContext) return answer("当前会话尚未关联共享上下文；不能读取其他渠道。");
+      return readSharedContext(args, active);
+    }
     if (["read_home_devices", "control_home_device", "speak_home_speaker"].includes(name)) {
       if (!context.readCalled) return answer("请先读取当前会话消息，再使用家居工具。", true);
       try {
