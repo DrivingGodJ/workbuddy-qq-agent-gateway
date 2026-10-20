@@ -371,7 +371,128 @@ class BridgeRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(bridge._is_transport_failure(wrapped))
         self.assertTrue(bridge._is_transport_failure(RuntimeError("Connection closed")))
+        self.assertTrue(bridge._is_transport_failure(RuntimeError("Socket is closed (target: upstream)")))
         self.assertFalse(bridge._is_transport_failure(RuntimeError("model rejected request")))
+
+    def test_transient_upstream_detection_rejects_auth_rate_limits_and_unknown_errors(self) -> None:
+        from codebuddy_agent_sdk._errors import AuthenticationError, ExecutionError
+        bridge = BRIDGE_MODULE.Bridge()
+        for message in ["API Error: 502 Bad Gateway", "HTTP 503 Service Unavailable",
+                        "upstream status=504", "Socket is closed", "connection reset by peer"]:
+            with self.subTest(message=message):
+                self.assertTrue(bridge._is_transient_upstream_failure(
+                    ExecutionError([message], "error_during_execution")))
+        for message in ["API Error: 401 Socket is closed", "HTTP 403 Forbidden", "status=429 rate limit",
+                        "HTTP 400 invalid parameter", "HTTP 500 unknown failure", "model rejected request",
+                        "invalid parameter: context_token_limit=502"]:
+            with self.subTest(message=message):
+                self.assertFalse(bridge._is_transient_upstream_failure(
+                    ExecutionError([message], "error_during_execution")))
+        wrapped = RuntimeError("outer")
+        wrapped.__cause__ = AuthenticationError("unauthorized", "Socket is closed")
+        self.assertFalse(bridge._is_transient_upstream_failure(wrapped))
+
+    async def _run_sdk_error_turn(self, message, *, tools=(), shutdown_error=False):
+        from codebuddy_agent_sdk import CodeBuddySDKClient, ResultMessage
+        bridge = BRIDGE_MODULE.Bridge()
+        session = BRIDGE_MODULE.Session("transport-thread", "/tmp")
+        session.sdk_session_id = "persistent-sdk-session"
+        client = FakeClient()
+        if shutdown_error:
+            client.disconnect = AsyncMock(side_effect=RuntimeError("cannot confirm shutdown"))
+        session.client = client
+        bridge.sessions[session.thread_id] = session
+        turn = BRIDGE_MODULE.Turn(session.thread_id, "transport-turn", "transport-group")
+        turn.tool_attempts.update(tools)
+        bridge.turns[turn.turn_id] = turn
+        bridge.active_by_group[turn.group_id] = turn
+
+        async def messages():
+            yield ResultMessage(subtype="error_during_execution", duration_ms=0, duration_api_ms=0,
+                is_error=True, num_turns=1, session_id="must-not-replace-session", errors=[message])
+
+        # Exercise the real SDK method: it raises ExecutionError before yielding
+        # its ResultMessage, unlike a mocked bridge-level WorkBuddyModelFailure.
+        client.receive_messages = messages
+        client.receive_response = lambda: CodeBuddySDKClient.receive_response(client)
+        bridge._send_prompt_resilient = AsyncMock(return_value=client)
+        events = []
+
+        def capture(event):
+            if event.get("method") == "error":
+                self.assertNotIn(turn.turn_id, bridge.turns)
+                self.assertNotIn(turn.group_id, bridge.active_by_group)
+                self.assertTrue(turn.done.is_set())
+            events.append(event)
+
+        with patch.object(BRIDGE_MODULE, "emit", side_effect=capture):
+            await bridge._run_turn(turn, session, {"prompt": "offline", "cwd": "/tmp",
+                "turnSandbox": {"type": "readOnly"}})
+        bridge._send_prompt_resilient.assert_awaited_once()
+        self.assertEqual(session.sdk_session_id, "persistent-sdk-session")
+        self.assertFalse(any(event.get("method") == "turn/completed" for event in events))
+        error = next(event["params"] for event in events if event.get("method") == "error")
+        return session, client, error
+
+    async def test_real_sdk_execution_error_retires_client_and_reports_complete_tool_audit(self) -> None:
+        for message in ["API Error: 502 Socket is closed (target: https://example.invalid)",
+                        "HTTP 503 Service Unavailable"]:
+            for tools in [("mcp__qq_gateway__read_messages",),
+                          ("Bash", "mcp__qq_gateway__send_message", "Read")]:
+                with self.subTest(message=message, tools=tools):
+                    session, client, error = await self._run_sdk_error_turn(message, tools=tools)
+                    self.assertTrue(client.disconnected)
+                    self.assertIsNone(session.client)
+                    self.assertEqual(error["error"]["code"], "WORKBUDDY_TRANSIENT_UPSTREAM")
+                    self.assertTrue(error["released"])
+                    # Unsafe attempts remain visible; only Node decides replay safety.
+                    self.assertEqual(error["toolAttempts"], sorted(tools))
+
+    async def test_unknown_and_auth_sdk_errors_offer_no_automatic_recovery(self) -> None:
+        for message in ["unknown execution failure", "API Error: 401 unauthorized", "HTTP 429 rate limit"]:
+            with self.subTest(message=message):
+                session, client, error = await self._run_sdk_error_turn(message)
+                self.assertIs(session.client, client)
+                self.assertFalse(client.disconnected)
+                self.assertNotIn("code", error["error"])
+                self.assertNotIn("released", error)
+                self.assertNotIn("toolAttempts", error)
+
+    async def test_failed_shutdown_does_not_offer_recovery_even_after_cache_is_cleared(self) -> None:
+        session, _, error = await self._run_sdk_error_turn("Socket is closed", shutdown_error=True)
+        self.assertIsNone(session.client)
+        self.assertNotIn("code", error["error"])
+        self.assertNotIn("released", error)
+        self.assertNotIn("toolAttempts", error)
+
+    async def test_process_kill_requires_confirmed_exit_before_recovery(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        bridge = BRIDGE_MODULE.Bridge()
+        for confirmed in (True, False):
+            with self.subTest(confirmed=confirmed):
+                process = SimpleNamespace(returncode=None, terminate=Mock(), kill=Mock(),
+                    wait=AsyncMock(side_effect=[TimeoutError(), 0 if confirmed else RuntimeError("still running")]))
+                client = FakeClient()
+                client.disconnect = AsyncMock(side_effect=RuntimeError("disconnect failed"))
+                client._transport = SimpleNamespace(_process=process)
+                self.assertEqual(await bridge._disconnect_client(client), confirmed)
+                process.terminate.assert_called_once()
+                process.kill.assert_called_once()
+
+    async def test_query_failure_does_not_reconnect_until_old_client_shutdown_is_confirmed(self) -> None:
+        bridge = BRIDGE_MODULE.Bridge()
+        session = BRIDGE_MODULE.Session("thread-unconfirmed", "/tmp")
+        client = FakeClient()
+        client.disconnect = AsyncMock(side_effect=RuntimeError("cannot confirm shutdown"))
+        session.client = client
+        bridge._send_prompt = AsyncMock(side_effect=ConnectionResetError("socket is closed"))
+        bridge._make_client = AsyncMock()
+        with self.assertRaises(ConnectionResetError):
+            await bridge._send_prompt_resilient(session, client, "hello", [])
+        self.assertIsNone(session.client)
+        bridge._make_client.assert_not_awaited()
+        self.assertEqual(bridge._send_prompt.await_count, 1)
 
     async def test_dead_client_is_replaced_and_prompt_is_retried_once(self) -> None:
         bridge = BRIDGE_MODULE.Bridge()

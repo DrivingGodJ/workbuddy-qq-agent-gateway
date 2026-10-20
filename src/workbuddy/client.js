@@ -85,6 +85,14 @@ function replaySafeTool(name) {
   return REPLAY_SAFE_TOOLS.has(String(name));
 }
 
+function replaySafeTurn(active, released, toolAttempts) {
+  return released === true && Array.isArray(toolAttempts)
+    && toolAttempts.every((name) => typeof name === "string" && replaySafeTool(name))
+    && active.toolTracking && !active.sideEffectsPossible && !active.compacting
+    && !active.qqToolContext?.failed && !active.qqToolContext?.ended
+    && !active.qqToolContext?.actionCount && !active.mcpActions?.length;
+}
+
 export class WorkBuddyClient {
   constructor({
     python,
@@ -356,13 +364,20 @@ export class WorkBuddyClient {
       || [...this.recoveries.values()].some((item) => item.groupId === String(request.groupId))) {
       throw new Error("WorkBuddy target already has a queued recovery");
     }
+    // Read once and keep the submitted envelope for a safe reconnect. Reusing
+    // only the original task would lose its prefetch once readCalled is true.
+    const prepared = request.prefetchQqMessages === false ? request : {
+      ...request,
+      prompt: await prepareLiveConversationPrompt(request.qqToolContext, request.prompt),
+      prefetchQqMessages: false,
+    };
     try {
-      return await this.runSingleTurn(request);
+      return await this.runSingleTurn(prepared);
     } catch (error) {
       // One continuation inside the original queued job, never a new session or
       // a concurrent writer. All side-effecting/uncertain turns fail closed.
       const context = request.qqToolContext;
-      if (!context || error.code !== "WORKBUDDY_IDLE_TIMEOUT" || !error.safeToRetry
+      if (!context || !["WORKBUDDY_IDLE_TIMEOUT", "WORKBUDDY_TRANSIENT_UPSTREAM"].includes(error.code) || !error.safeToRetry
         || context.failed || context.ended || context.canRead?.() === false) throw error;
       const key = String(request.threadId);
       const recovery = { groupId: String(request.groupId), controller: new AbortController() };
@@ -372,7 +387,7 @@ export class WorkBuddyClient {
       try {
         await pause(this.recoveryDelayMs, undefined, { signal: recovery.controller.signal });
         if (context.canRead?.() === false || context.failed || context.ended) throw new WorkBuddyTurnCancelledError();
-        return await this.runSingleTurn({ ...request, refreshClientBeforeTurn: true,
+        return await this.runSingleTurn({ ...prepared, refreshClientBeforeTurn: true,
           recoverySignal: recovery.controller.signal });
       } catch (nextError) {
         if (recovery.controller.signal.aborted) throw new WorkBuddyTurnCancelledError();
@@ -501,11 +516,13 @@ export class WorkBuddyClient {
     clearTimeout(active.timeout);
     active.cancelRequested = true;
     let released = false;
+    let toolAttempts = null;
     try {
       // The bridge releases its target lock before acknowledging interrupt.
       // Do not free the local writer first or an immediate retry collides with it.
       const result = await this.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId }, 30_000);
       released = result?.ok === true && Array.isArray(result.toolAttempts);
+      toolAttempts = result?.toolAttempts;
       if (result?.toolAttempts?.some((name) => !replaySafeTool(name))) active.sideEffectsPossible = true;
     } catch {
       // If the bridge cannot confirm cleanup, retire it before allowing another
@@ -526,9 +543,7 @@ export class WorkBuddyClient {
     }
     const error = new Error(reason);
     error.code = active.compacting ? "WORKBUDDY_COMPACTION_TIMEOUT" : "WORKBUDDY_IDLE_TIMEOUT";
-    error.safeToRetry = released && active.toolTracking && !active.sideEffectsPossible
-      && !active.qqToolContext?.failed && !active.qqToolContext?.ended
-      && !active.qqToolContext?.actionCount && !active.mcpActions?.length;
+    error.safeToRetry = replaySafeTurn(active, released, toolAttempts);
     this.finishTurn(active, error);
   }
 
@@ -779,8 +794,13 @@ export class WorkBuddyClient {
       const active = turnId
         ? this.activeByTurn.get(turnId)
         : this.activeByThread.get(String(params.threadId || ""));
-      if (!active) return;
-      this.finishTurn(active, new Error(active.timeoutReason || params.error?.message || "WorkBuddy bridge error"));
+      if (!active || String(params.threadId || "") !== active.threadId || active.timeoutInProgress) return;
+      const error = new Error(active.timeoutReason || params.error?.message || "WorkBuddy bridge error");
+      if (!active.cancelRequested && params.error?.code === "WORKBUDDY_TRANSIENT_UPSTREAM") {
+        error.code = params.error.code;
+        error.safeToRetry = replaySafeTurn(active, params.released, params.toolAttempts);
+      }
+      this.finishTurn(active, error);
     }
   }
 

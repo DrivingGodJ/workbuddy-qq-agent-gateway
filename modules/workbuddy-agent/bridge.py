@@ -488,26 +488,36 @@ class Bridge:
         log(f"已把 SDK 会话 {sdk_session_id} 复制到当前工作区会话库（原记录保留）")
 
     @staticmethod
-    async def _disconnect_client(client: Any) -> None:
+    async def _disconnect_client(client: Any) -> bool:
         """Disconnect an SDK client and force-stop its CLI if SDK cleanup stalls."""
         transport = getattr(client, "_transport", None)
         process = getattr(transport, "_process", None)
+        disconnected = False
         try:
             await asyncio.wait_for(client.disconnect(), timeout=8.0)
+            disconnected = True
         except Exception as exc:
             log(f"client disconnect 异常，改为终止 CLI: {exc}")
         if process is not None and getattr(process, "returncode", None) is None:
             try:
                 process.terminate()
             except ProcessLookupError:
-                return
+                return True
             try:
                 await asyncio.wait_for(process.wait(), timeout=5.0)
+                return True
             except Exception:
                 try:
                     process.kill()
                 except ProcessLookupError:
-                    pass
+                    return True
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                    return True
+                except Exception as exc:
+                    log(f"无法确认失效 CLI 已退出: {exc}")
+                    return False
+        return disconnected or (process is not None and process.returncode is not None)
 
     @staticmethod
     def _is_transport_failure(exc: BaseException) -> bool:
@@ -537,6 +547,9 @@ class Bridge:
             "closed resource",
             "transport closed",
             "stream closed",
+            "socket is closed",
+            "socket closed",
+            "socket hang up",
         )
         current: Optional[BaseException] = exc
         seen: set[int] = set()
@@ -550,18 +563,45 @@ class Bridge:
             current = current.__cause__ or current.__context__
         return False
 
-    async def _retire_client(self, session: Session, client: Any, reason: BaseException) -> None:
+    @classmethod
+    def _is_transient_upstream_failure(cls, exc: BaseException) -> bool:
+        """Only explicit temporary service/transport failures qualify for recovery.
+
+        SDK ExecutionError is also used for authentication and invalid requests.
+        Never make that entire exception class retryable, or infer retry safety
+        from a generic execution failure.
+        """
+        current: Optional[BaseException] = exc
+        seen: set[int] = set()
+        statuses: set[str] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if type(current).__name__ == "AuthenticationError":
+                return False
+            errors = getattr(current, "errors", None)
+            for text in [str(current), *(errors if isinstance(errors, (list, tuple)) else [])]:
+                statuses.update(re.findall(
+                    r"(?:\b(?:http|status(?:\s*code)?|(?:api\s*)?error)\s*[:=]?\s*|\A\s*)([45]\d\d)\b",
+                    str(text), re.IGNORECASE,
+                ))
+            current = current.__cause__ or current.__context__
+        if any(status.startswith("4") for status in statuses):
+            return False
+        return bool(statuses & {"502", "503", "504"}) or cls._is_transport_failure(exc)
+
+    async def _retire_client(self, session: Session, client: Any, reason: BaseException) -> bool:
         """Drop a dead cached client while preserving the persistent session id."""
         if client is None:
-            return
+            return False
         if session.client is client:
             session.client = None
         session.closed = False
         log(f"检测到 WorkBuddy 连接失效，回收旧 client，保留原会话续接：{reason}")
         try:
-            await self._disconnect_client(client)
+            return await self._disconnect_client(client)
         except Exception as cleanup_exc:  # cleanup must not hide the real failure
             log(f"回收失效 client 时出现异常（忽略）: {cleanup_exc}")
+            return False
 
     async def _send_prompt_resilient(
         self,
@@ -584,7 +624,8 @@ class Bridge:
         except Exception as exc:
             if not self._is_transport_failure(exc):
                 raise
-            await self._retire_client(session, client, exc)
+            if not await self._retire_client(session, client, exc):
+                raise
 
         replacement = await self._make_client(session, resume=session.sdk_session_id)
         try:
@@ -1176,20 +1217,26 @@ class Bridge:
                 },
             })
         except Exception as exc:
-            # A loss after query() was accepted must not replay this turn: it may
-            # already have executed side effects.  Retire the dead client so the
-            # next explicit retry reconnects to the same persistent session.
-            if (isinstance(exc, WorkBuddyModelFailure) or self._is_transport_failure(exc)) and session.client is not None:
-                await self._retire_client(session, session.client, exc)
+            # Never replay an accepted prompt here: it may have side effects.
+            # Node owns one audited continuation inside the same queued job.
+            transient = self._is_transient_upstream_failure(exc)
+            retired = False
+            if (isinstance(exc, WorkBuddyModelFailure) or self._is_transport_failure(exc) or transient) and session.client is not None:
+                retired = await self._retire_client(session, session.client, exc)
             log(f"turn 失败: {exc}\n{traceback.format_exc()}")
             self._release_turn(turn)
+            recovery = {}
+            if transient and retired and session.client is None and turn.turn_id not in self.turns and self.active_by_group.get(turn.group_id) is not turn:
+                recovery = {"released": True, "toolAttempts": sorted(turn.tool_attempts)}
             emit({
                 "jsonrpc": "2.0",
                 "method": "error",
                 "params": {
                     "threadId": turn.thread_id,
                     "turnId": turn.turn_id,
-                    "error": {"message": self._friendly_error(exc)},
+                    "error": {"message": self._friendly_error(exc),
+                              **({"code": "WORKBUDDY_TRANSIENT_UPSTREAM"} if recovery else {})},
+                    **recovery,
                 },
             })
         finally:
