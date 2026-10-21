@@ -779,7 +779,7 @@ class Bridge:
                 # QQ tool schemas are small and static. Keep the entire scoped
                 # catalog inline across chat/Space turns so discovery does not
                 # add new definitions in front of the cached transcript. AUTO
-                # still advertises only its single source reader below.
+                # still advertises only its scoped read-only tools below.
                 "defer_loading": False,
                 "tools": {},
                 "env": {
@@ -795,9 +795,9 @@ class Bridge:
             effort=session.effort,
             permission_mode=session.permission_mode,
             # --tools selects built-in tools; MCP tools are added by the server
-            # manager. AUTO retains its broker-only built-ins and scoped source
-            # reader, which the inline MCP config makes directly available.
-            tools=["ToolSearch", "DeferExecuteTool"] if session.source_read_only
+            # manager. AUTO needs no built-ins: its scoped source tools are
+            # already inline, so legacy discovery only teaches a stale path.
+            tools=[] if session.source_read_only
             else READ_ONLY_TOOLS if session.permission_mode == "dontAsk" else None,
             mcp_servers=mcp_servers,
             system_prompt=AppendSystemPrompt(append="\n\n".join(system_parts))

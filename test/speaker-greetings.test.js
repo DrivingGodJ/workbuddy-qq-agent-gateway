@@ -58,6 +58,13 @@ test("fixed Shanghai slots default off and each target/slot is independently ena
   f.clock("2026-10-14T15:30:00Z"); await f.coordinator.tick(); await f.coordinator.drain();
   assert.deepEqual(f.calls.model.map((call) => [call.id, call.options.qqToolContext.greetingJobId.split(":").at(-1)]), [["10000", "morning"], ["10001", "noon"], ["10000", "night"]]);
   assert.equal(f.calls.model.every((call) => call.options.trigger === "speaker-greeting" && !call.prompt.includes("未处理消息")), true);
+  for (const { prompt } of f.calls.model) {
+    assert.match(prompt, /mcp__qq_gateway__read_home_devices/);
+    assert.match(prompt, /mcp__qq_gateway__speak_home_speaker/);
+    assert.match(prompt, /只在小爱播报一次/);
+    assert.match(prompt, /不向 QQ 发送.*不读取聊天/);
+    assert.doesNotMatch(prompt, /ToolSearch|DeferExecuteTool/);
+  }
   assert.equal(f.targets.every((target) => target.state.pendingMessages.length === 1), true);
 });
 

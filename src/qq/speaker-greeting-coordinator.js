@@ -198,7 +198,7 @@ export class SpeakerGreetingCoordinator {
         await this.update(() => { job.stage = "generating"; });
         this.notify(job);
         context = this.contextFor(job, active);
-        const prompt = `小爱${LABELS[job.slot]}。上海时间 ${job.date} ${job.time}。按当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。先调用 read_home_devices 核实发言入口，再调用 speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
+        const prompt = `小爱${LABELS[job.slot]}。上海时间 ${job.date} ${job.time}。按当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。先直接调用 mcp__qq_gateway__read_home_devices 核实发言入口，再直接调用 mcp__qq_gateway__speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
         const result = await runTurn(prompt, { trigger: "speaker-greeting", qqToolContext: context });
         if (context.error) throw context.error;
         if (active.cancelRequested || result?.cancelled || result?.status === "cancelled") throw cancelled();

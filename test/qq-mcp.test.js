@@ -79,7 +79,20 @@ test("stable gateway rules distinguish live MCP sends from structured AUTO and s
   assert.match(rules, /由网关按结构化输出发送，不用普通聊天的 send_message/);
   assert.match(rules, /聊天和动态定时任务共用工具/);
   assert.match(rules, /定时任务.*不会预塞群聊消息，读取也不清理 pending/);
+  assert.match(rules, /mcp__qq_gateway__/);
+  assert.match(rules, /(?:不经|不要|不得|禁止)[^\n]*ToolSearch[^\n]*DeferExecuteTool/);
+  for (const name of ["read_home_devices", "control_home_device", "speak_home_speaker"]) {
+    assert.ok(rules.includes(`mcp__qq_gateway__${name}`), name);
+  }
   assert.doesNotMatch(rules, /\[\[qq_/);
+});
+
+test("inline tool instructions stay in the stable system prompt rather than every chat turn", () => {
+  for (const targetType of ["group", "private"]) {
+    const prompt = buildMcpTurnPrompt({ targetType, sharedSystemInstructions: true });
+    assert.doesNotMatch(prompt, /mcp__qq_gateway__|ToolSearch|DeferExecuteTool/);
+    assert.doesNotMatch(prompt, /read_home_devices|control_home_device|speak_home_speaker/);
+  }
 });
 
 test("read-only host permissions do not forbid ordinary QQ replies", () => {
