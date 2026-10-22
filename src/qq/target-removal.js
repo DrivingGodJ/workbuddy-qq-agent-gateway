@@ -25,11 +25,14 @@ export async function removeGatewayTarget({ type, id, targetStore, subscriptions
     await mkdir(archiveDir, {recursive:true,mode:0o700});
     archiveFile = join(archiveDir, `${type}-${id}-${randomUUID()}.json`);
     const selectedSubscriptions = Object.values(subscriptions.snapshot().subscriptions || {})
-      .filter((item) => item.targetType === type && item.targetId === id);
+      .filter((item) => item.targetType === type && item.targetId === id)
+      .map((item) => metadataFields(item, ["id", "targetType", "targetId", "sourceGroupId", "mode", "intakeMode", "collectionDelayMinutes", "enabled", "createdAt", "updatedAt"]));
     const binding = qzoneStore?.snapshot();
-    await writeFile(archiveFile, JSON.stringify({version:1,removedAt:new Date().toISOString(),type,id,
-      conversation,subscriptions:selectedSubscriptions,
-      qzoneBinding:binding?.targetType === type && binding.targetId === id ? binding : null},null,2), {mode:0o600,flag:"wx"});
+    await writeFile(archiveFile, JSON.stringify({version:2,removedAt:new Date().toISOString(),type,id,
+      conversation:metadataFields(conversation, ["groupId", "replyEnabled", "replyRevision", "codexConfig", "threadId", "threadCreatedAt", "lastActivityAt", "bootstrapComplete", "bootstrapRevision", "migratedFromLegacy"]),
+      subscriptions:selectedSubscriptions,
+      qzoneBinding:binding?.targetType === type && binding.targetId === id
+        ? metadataFields(binding, ["targetType", "targetId", "autoPostEnabled", "autoEngageEnabled"]) : null},null,2), {mode:0o600,flag:"wx"});
   }
   await allowlist.remove(type, id);
   onDisabled(type, id);
@@ -38,5 +41,10 @@ export async function removeGatewayTarget({ type, id, targetStore, subscriptions
   const binding = qzoneStore?.snapshot();
   if (binding?.targetType === type && binding.targetId === id) await qzoneStore.configure({});
   return {removed:true,archiveFile,threadId:conversation?.threadId || null,
-    subscriptionCount:removedSubscriptions.count,removedMessages:removedSubscriptions.removedMessages};
+    subscriptionCount:removedSubscriptions.count,
+    removedMessages:[...(conversation?.pendingMessages || []), ...(removedSubscriptions.removedMessages || [])]};
+}
+
+function metadataFields(value, fields) {
+  return Object.fromEntries(fields.filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]]));
 }

@@ -15,7 +15,7 @@ const els = Object.fromEntries([
   "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentModeExplanation",
   "agentSpeakerMorning", "agentSpeakerNoon", "agentSpeakerNight", "speakerGreetingsHint",
   "agentSettingsHint", "agentSettingsStatus", "saveAgentSettingsButton",
-  "personaDetails", "personaSummary", "personaOwnerStyleSummary", "personaOwnerStyleRules", "personaPromptPreview",
+  "personaDetails", "personaSummary", "personaPromptPreview",
   "personaNameForm", "personaNameInput", "personaNameStatus", "savePersonaNameButton",
   "personaCatchphraseForm", "personaCatchphraseRows", "personaCatchphraseStatus", "personaCatchphraseSaveStatus", "addPersonaCatchphraseButton", "savePersonaCatchphraseButton",
   "stickerLabelDetails", "stickerLabelSummary", "stickerLabelForm", "stickerLabelModel", "stickerLabelStatus", "saveStickerLabelButton",
@@ -435,10 +435,12 @@ function renderDiagnostics(item) {
   ];
   els.usageSummary.innerHTML = metrics.map(([label, value]) => `<div><span>${label}</span><strong>${number(value)}</strong></div>`).join("");
   if (data?.firstTextMs !== null && Number.isFinite(data?.firstTextMs)) els.usageSummary.insertAdjacentHTML("beforeend", `<div><span>首段模型文字</span><strong>${(data.firstTextMs / 1000).toFixed(1)} 秒</strong></div>`);
-  const key = `${item?.key}:${data?.requests || 0}`;
+  const key = `${item?.key}:${data?.requests || 0}:${data?.finishedAtMs ?? "running"}`;
   if (key !== inputPreviewKey) {
     inputPreviewKey = key;
-    els.turnInputPreview.textContent = "点击查看最新提交内容；这里只保留最近一轮，不积累聊天历史。";
+    els.turnInputPreview.textContent = data?.stage === "complete"
+      ? "本轮已正常完成，输入正文已清理；会话上下文由 WorkBuddy 保存。"
+      : "运行期间可查看本轮提交内容；正常完成后立即清理，不积累聊天历史。";
     if (els.diagnosticsDetails.open && els.settingsDrawer.open) loadInputPreview();
   }
 }
@@ -453,7 +455,9 @@ async function loadInputPreview() {
     if (key !== inputPreviewKey) return;
     els.turnInputPreview.textContent = result.diagnostics?.inputPreview
       ? `${result.diagnostics.inputPreview}${result.diagnostics.inputTruncated ? "\n（预览限 32000 字符，真实输入未截断）" : ""}`
-      : "尚无本次网关运行期间的模型输入记录。";
+      : result.diagnostics?.stage === "complete"
+        ? "本轮已正常完成，输入正文已清理；会话上下文由 WorkBuddy 保存。"
+        : "尚无本轮模型输入记录。";
   } catch (error) { if (key === inputPreviewKey) els.turnInputPreview.textContent = error.message; }
 }
 
@@ -551,29 +555,18 @@ function renderContextLink(item) {
 
 function renderPersona(item) {
   const persona = state?.persona || {};
-  const publishedStyle = persona.publishedStyle || {};
   els.personaSummary.textContent = `${agentName()} · 所有会话共用`;
   if (!personaNameDirty && els.personaNameInput.value !== agentName()) els.personaNameInput.value = agentName();
   els.savePersonaNameButton.disabled = !personaNameDirty;
   const active = persona.catchphrases || [];
-  const pending = Array.isArray(persona.pendingCatchphrases) ? persona.pendingCatchphrases : null;
-  const editable = pending ?? active;
-  const signature = JSON.stringify([editable, persona.pendingCatchphrasesAt]);
+  const signature = JSON.stringify(active);
   if (!personaCatchphraseDirty && signature !== personaCatchphraseSignature) {
-    els.personaCatchphraseRows.innerHTML = editable.map((entry, index) => catchphraseRow(entry, index)).join("") || '<p class="field-note">当前没有口头禅。可以添加，或保存空列表以清除已生效的口头禅。</p>';
+    els.personaCatchphraseRows.innerHTML = active.map((entry, index) => catchphraseRow(entry, index)).join("") || '<p class="field-note">当前没有口头禅。可以添加，或保存空列表以清除已生效的口头禅。</p>';
     personaCatchphraseSignature = signature;
   }
-  els.personaCatchphraseStatus.textContent = pending === null
-    ? `已生效 ${active.length} 条`
-    : `已生效 ${active.length} 条 · 待 ${formatTime(persona.pendingCatchphrasesAt)} 更新 ${pending.length} 条`;
+  els.personaCatchphraseStatus.textContent = `已保存 ${active.length} 条`;
   els.savePersonaCatchphraseButton.disabled = !personaCatchphraseDirty;
   els.addPersonaCatchphraseButton.disabled = els.personaCatchphraseRows.querySelectorAll(".persona-catchphrase-row").length >= 20;
-  els.personaOwnerStyleSummary.textContent = publishedStyle.summarizedAt
-    ? `最近更新 ${formatTime(publishedStyle.summarizedAt)}` : "尚未总结";
-  const learnedRules = publishedStyle.rules || [];
-  els.personaOwnerStyleRules.innerHTML = learnedRules.length
-    ? learnedRules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")
-    : "<li>尚无已发布的表达规则。</li>";
   els.personaPromptPreview.textContent = persona.promptPreview || "—";
 }
 
@@ -588,7 +581,7 @@ function catchphraseRow(entry = { text: "", when: "" }, index = 0) {
 function renderStickerLabelSettings() {
   const labeling = state?.qq?.stickers?.labeling || { model: "hy3" };
   const model = modelInfo(labeling.model);
-  els.stickerLabelSummary.textContent = `${model?.displayName || labeling.model || "hy3"} · 三项共用`;
+  els.stickerLabelSummary.textContent = `${model?.displayName || labeling.model || "hy3"} · 两项共用`;
   const nextSignature = JSON.stringify([labeling.model, state?.ai?.availableModels]);
   if (!stickerLabelDirty && stickerLabelSignature !== nextSignature) {
     const models = [...(state?.ai?.availableModels || [])];
@@ -1401,7 +1394,7 @@ function catchphraseDraft() {
 }
 function setCatchphraseDraft(entries) {
   els.personaCatchphraseRows.innerHTML = entries.map((entry, index) => catchphraseRow(entry, index)).join("")
-    || '<p class="field-note">保存空列表后，下次 04:00 将清除全部口头禅。</p>';
+    || '<p class="field-note">保存空列表后，下一轮回复将不再使用固定口头禅。</p>';
   personaCatchphraseDirty = true;
   els.personaCatchphraseSaveStatus.textContent = "有未保存的修改";
   els.personaCatchphraseSaveStatus.className = "form-status";
@@ -1439,7 +1432,7 @@ els.personaCatchphraseForm.addEventListener("submit", async (event) => {
     state.persona = response.persona;
     personaCatchphraseDirty = false;
     personaCatchphraseSignature = "";
-    els.personaCatchphraseSaveStatus.textContent = `已保存；${formatTime(response.persona.pendingCatchphrasesAt)} 生效。`;
+    els.personaCatchphraseSaveStatus.textContent = "已保存；下一轮回复生效。";
     els.personaCatchphraseSaveStatus.className = "form-status";
     renderPersona(currentTarget());
   } catch (error) {
@@ -1469,7 +1462,7 @@ els.stickerLabelForm.addEventListener("submit", async (event) => {
     state.qq.stickers.labeling = response;
     stickerLabelDirty = false;
     stickerLabelSignature = "";
-    els.stickerLabelStatus.textContent = "已保存；三项任务从下次启动时使用，新旧会话模型不变。";
+    els.stickerLabelStatus.textContent = "已保存；两项任务从下次启动时使用，新旧会话模型不变。";
     renderStickerLabelSettings();
     scheduleRefresh();
   } catch (error) {

@@ -241,8 +241,10 @@ test("recall_message only retracts confirmed self messages in this conversation 
   assert.equal(f.store.getSentMessage("12345", "777"), null);
   assert.equal((await f.context.liveTool("recall_message", { message_id: "777" }, f.active)).isError, true);
   await f.context.liveTool("end_conversation", {}, f.active);
+  await f.append("after-recall", "撤回后新到、尚未读取的消息");
   await f.store.completeLiveConversation("12345", { lastReadSequence: f.context.lastReadSequence });
   assert.equal(f.store.snapshot("12345").pendingMessages.length, 1);
+  assert.equal(f.store.snapshot("12345").pendingMessages[0].messageId, "after-recall");
   assert.equal(f.store.snapshot("12345").lastCompletedReply, null);
 });
 
@@ -358,13 +360,13 @@ test("a process restart during a live conversation retains the sent receipt and 
   assert.equal(duplicateSends, 0);
 });
 
-test("choosing not to reply retains messages without immediately retriggering the same batch", async (t) => {
+test("choosing not to reply clears consumed messages without retriggering the same batch", async (t) => {
   const { store, context, active } = await fixture(t);
   await context.liveTool("read_messages", {}, active);
   await context.liveTool("end_conversation", {}, active);
   const removed = await store.completeLiveConversation("12345", { lastReadSequence: context.lastReadSequence });
-  assert.deepEqual(removed, []);
-  assert.equal(store.snapshot("12345").pendingMessages.length, 1);
+  assert.deepEqual(removed.map((message) => message.messageId), ["m1"]);
+  assert.equal(store.snapshot("12345").pendingMessages.length, 0);
   const triggers = new TriggerManager({ store, messageCount: 1 });
   assert.equal(await triggers.reconsiderPending("12345"), null);
 });

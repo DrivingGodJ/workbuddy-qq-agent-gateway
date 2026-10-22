@@ -168,7 +168,7 @@
             <summary><span data-agent-name>老代</span>人格 <span id="personaSummary">所有会话共用</span></summary>
             <div class="agent-settings-form persona-form">
               <p class="field-note">所有群聊、私聊和动态共用同一份人格；不再计算或注入每轮精力、熟悉度和关系状态。固定核心可在本机私人人格文件中编辑。</p>
-              <p class="field-note">每天 04:00 的发言风格总结仍会更新共用人格。</p>
+              <p class="field-note">不再为人格学习缓存聊天记录或自动总结发言风格。固定人格和口头禅由你手动维护。</p>
               <form id="personaNameForm" class="persona-editor" autocomplete="off">
                 <label for="personaNameInput">AI 昵称
                   <input id="personaNameInput" name="name" minlength="2" maxlength="16" required spellcheck="false" />
@@ -179,38 +179,29 @@
               </form>
               <form id="personaCatchphraseForm" class="persona-editor">
                 <div class="persona-learning-head"><span>固定口头禅</span><strong id="personaCatchphraseStatus">当前已生效</strong></div>
-                <p class="field-note">填写短句和适用场景，格式与现有人格一致。增减后保存为待生效版本；下次北京时间 04:00 与每日总结一起发布。</p>
+                <p class="field-note">填写短句和适用场景，格式与现有人格一致。保存后从下一轮回复起生效。</p>
                 <div id="personaCatchphraseRows" class="persona-catchphrase-rows"></div>
                 <button id="addPersonaCatchphraseButton" class="button ghost" type="button">添加口头禅</button>
                 <p id="personaCatchphraseSaveStatus" class="form-status" role="status" aria-live="polite"></p>
-                <button id="savePersonaCatchphraseButton" class="button primary" type="submit" disabled>保存，等待 04:00 生效</button>
+                <button id="savePersonaCatchphraseButton" class="button primary" type="submit" disabled>保存口头禅</button>
               </form>
-              <section class="persona-learning" aria-label="自动学习 OWNER 的表达方式">
-                <div class="persona-learning-head">
-                  <span>每天 04:00 的表达总结</span>
-                  <strong id="personaOwnerStyleSummary">尚未总结</strong>
-                </div>
-                <ul id="personaOwnerStyleRules" class="persona-owner-style-rules">
-                  <li>尚无已发布的表达规则。</li>
-                </ul>
-              </section>
               <details class="persona-preview-details">
                 <summary>查看共用人格</summary>
                 <pre id="personaPromptPreview" class="persona-prompt-preview">—</pre>
-                <p class="field-note">当前固定核心和已发布的每日总结。本轮消息与权限另行提供。</p>
+                <p class="field-note">当前固定人格和口头禅。本轮消息与权限另行提供。</p>
               </details>
             </div>
           </details>
 
           <details id="stickerLabelDetails" class="session-details agent-settings-details">
-            <summary>临时任务模型 <span id="stickerLabelSummary">hy3 · 三项共用</span></summary>
+            <summary>临时任务模型 <span id="stickerLabelSummary">hy3 · 两项共用</span></summary>
             <form id="stickerLabelForm" class="agent-settings-form">
               <label for="stickerLabelModel">共用模型
                 <select id="stickerLabelModel" required></select>
               </label>
               <div class="parameter-explanation">
-                <p><strong>同时用于三项任务</strong>新表情识图、每天 04:00 聊天风格总结、每天 05:00 超过 100 个表情时的筛选。仅影响之后启动的临时任务，不改变群聊、私聊和动态会话的模型。</p>
-                <p><strong>不积累上下文</strong>各任务使用独立临时会话，完成后清理。识图可与聊天回复并行；已识别的表情会等当前回复发送完成后再入库。风格总结和表情筛选会等待正在进行的任务结束。</p>
+                <p><strong>同时用于两项任务</strong>新表情识图、每天 05:00 超过 100 个表情时的筛选。仅影响之后启动的临时任务，不改变群聊、私聊和动态会话的模型。</p>
+                <p><strong>不积累上下文</strong>各任务使用独立临时会话，完成后清理。识图可与聊天回复并行；已识别的表情会等当前回复发送完成后再入库。表情筛选会等待正在进行的任务结束。</p>
               </div>
               <p id="stickerLabelStatus" class="form-status" role="status" aria-live="polite"></p>
               <button id="saveStickerLabelButton" class="button primary full-button" type="submit" disabled>保存共用模型</button>

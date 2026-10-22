@@ -31,6 +31,7 @@ export class GroupWorker {
   constructor({
     store, codex, oneBot, mediaManager, fileManager, stickerManager = null, stickerLabeler = null, triggerManager,
     subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null,
+    knownMemberIds = () => [],
     sharedWorkspaceRoot = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs
   } = {}) {
     this.store = store;
@@ -46,6 +47,7 @@ export class GroupWorker {
     this.homeAssistant = homeAssistant;
     this.persona = persona;
     this.targetNameResolver = targetNameResolver;
+    this.knownMemberIds = knownMemberIds;
     this.sharedWorkspaceRoot = sharedWorkspaceRoot ? resolve(sharedWorkspaceRoot) : null;
     this.canRun = (id) => canRun(id) && this.store.snapshot(id).replyEnabled !== false;
     this.onEvent = onEvent;
@@ -550,13 +552,9 @@ export class GroupWorker {
     }
     const imagePaths = uniqueImagePaths([...inputMessages, ...inputContexts.flatMap((context) => context.messages || [])]);
     const pokeSenderId = String(work.trigger?.senderId || work.messages.at(-1)?.senderId || "");
-    const knownGroupMessages = [
-      ...work.messages,
-      ...(group.recentTurns || []).flatMap((turn) => turn.messages || [])
-    ];
-    const allowedPokeUserIds = [...new Set(knownGroupMessages
+    const allowedPokeUserIds = [...new Set(work.messages
       .map((message) => String(message.senderId || ""))
-      .concat(pokeSenderId)
+      .concat(this.knownMemberIds(groupId), pokeSenderId)
       .filter((id) => /^\d{5,14}$/.test(id)))];
     const qqToolContext = sourceViaMcp ? {
       sourceGroupId: inputContexts[0].sourceGroupId,
@@ -634,8 +632,6 @@ export class GroupWorker {
     this.store.assertReplyEnabled(groupId);
     if (useMcpRead) {
       if (qqToolContext.failed) throw new Error("本轮 QQ 操作失败；待处理消息仍保留");
-      const silentScheduledCompletion = work.trigger.reason === "scheduled"
-        && qqToolContext.actionCount === 0 && qqToolContext.readCalled;
       if (!qqToolContext.readCalled) throw new Error("Agent 本轮未读取消息；待处理消息仍保留");
       const live = this.store.snapshot(groupId).liveSession;
       const removedSourceMessages = this.subscriptionStore
@@ -645,8 +641,7 @@ export class GroupWorker {
       const processed = await this.store.completeLiveConversation(groupId, {
         turnId: result.turnId, trigger: work.trigger,
         bootstrapComplete: !result.compacted, bootstrapRevision: THREAD_INSTRUCTIONS_REVISION,
-        lastReadSequence: qqToolContext.lastReadSequence,
-        consumeReadWithoutReply: silentScheduledCompletion || qqToolContext.managementActionCount > 0 || qqToolContext.qzoneActionCount > 0
+        lastReadSequence: qqToolContext.lastReadSequence
       });
       await this.mediaManager.removeMessages([...processed, ...removedSourceMessages]);
       this.followup.publishWaiting(groupId, { threadId, turnId: result.turnId });

@@ -50,6 +50,7 @@ export class TurnDiagnostics {
     entry.finishedAtMs = this.clock();
     entry.stage = error ? "failed" : "complete";
     entry.error = error ? String(error.message || error) : null;
+    if (!error) delete entry.inputPreview;
   }
 
   snapshot(threadId, { includeInput = false } = {}) {

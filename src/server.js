@@ -9,7 +9,6 @@ import { HomeAssistantClient } from "./automation/home-assistant.js";
 import { CodexClient } from "./codex/client.js";
 import { WorkBuddyClient } from "./workbuddy/client.js";
 import { PersonaStore } from "./persona/persona-store.js";
-import { DailyStyleCoordinator } from "./persona/daily-style-coordinator.js";
 import { ThreadReservationManager } from "./codex/thread-reservations.js";
 import { GroupWorker } from "./groups/group-worker.js";
 import { GroupMemberDirectory } from "./qq/group-member-directory.js";
@@ -34,6 +33,7 @@ import { PrivateWorker } from "./qq/private-worker.js";
 import { AGENT_QQ_ID, OWNER_QQ_ID, parseOwnerControlCommand } from "./security/policy.js";
 import { SessionStore } from "./storage/session-store.js";
 import { AgentDispatchStore } from "./storage/agent-dispatch-store.js";
+import { eventMetadata } from "./security/event-metadata.js";
 import { StickerLabelSettingsStore } from "./storage/sticker-label-settings-store.js";
 import { QzoneStore } from "./qq/qzone-store.js";
 import { SubscriptionStore } from "./storage/subscription-store.js";
@@ -56,7 +56,6 @@ const stickerLabelSettingsPath = join(dataDir, "sticker-label-settings.json");
 const stickerCurationPath = join(dataDir, "sticker-curation.json");
 const qzoneStorePath = join(dataDir, "qzone.json");
 const personaOwnerStylePath = join(dataDir, "persona-owner-style.json");
-const personaStyleSamplesPath = join(dataDir, "persona-style-samples.json");
 const { corePath: personaCorePath, examplesPath: personaExamplesPath } = resolvePersonaFiles(
   projectDir, process.env.CODEX_REMOTE_CONTACT_PERSONA_DIR
 );
@@ -65,7 +64,6 @@ const mediaRoot = join(runtimeDir, "qq-media");
 const stickerLibraryDir = join(runtimeDir, "qq-stickers");
 const stickerLabelWorkspaceRoot = join(runtimeDir, "sticker-label-jobs");
 const stickerCurationWorkspaceRoot = join(runtimeDir, "sticker-curation-jobs");
-const personaStyleWorkspaceRoot = join(runtimeDir, "persona-style-jobs");
 const groupWorkspaceRoot = process.env.CODEX_REMOTE_CONTACT_GROUP_WORKSPACE_ROOT || join(runtimeDir, "group-workspaces");
 
 const hubHost = process.env.CODEX_REMOTE_CONTACT_HOST || "127.0.0.1";
@@ -189,8 +187,7 @@ if (sourceTargetCollisions.length) throw new Error(`A QQ group cannot be both AG
 
 const groupMemberDirectory = new GroupMemberDirectory({ rootDir: groupWorkspaceRoot });
 for (const group of store.listGroups().filter((item) => allowedGroups.includes(item.groupId))) {
-  const retained = [...(group.recentTurns || []).flatMap((turn) => turn.messages || []), ...(group.pendingMessages || [])];
-  await groupMemberDirectory.initGroup(group.groupId, retained)
+  await groupMemberDirectory.initGroup(group.groupId, group.pendingMessages || [])
     .catch((error) => console.warn(`QQ member directory initialization failed for ${group.groupId}: ${error.message}`));
 }
 const sourceMemberSnapshot = subscriptionStore.snapshot();
@@ -330,17 +327,11 @@ const homeAssistant = new HomeAssistantClient({
   allowedSpeakers: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_SPEAKERS || "").split(","))
 });
 const speakerGreetingsAvailable = homeAssistant.enabled && Boolean(homeAssistant.baseUrl && homeAssistant.token && homeAssistant.allowedSpeakers.size);
-const dailyStyle = new DailyStyleCoordinator({
-  filePath: personaStyleSamplesPath, workspaceRoot: personaStyleWorkspaceRoot,
-  persona: personaStore, codex, gate: taskGate,
-  getModel: () => stickerLabelSettingsStore.snapshot().model,
-  canRun: () => agentDispatchStore.isEnabled(), onEvent: recordEvent
-});
-await dailyStyle.init();
 const worker = new GroupWorker({
   store, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager, subscriptionStore, automationClient, persona: personaStore,
   homeAssistant,
   targetNameResolver: (groupId) => groupMetadata[groupId]?.groupName || null,
+  knownMemberIds: (groupId) => groupMemberDirectory.knownMemberIds(groupId),
   sharedWorkspaceRoot: groupWorkspaceRoot,
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && allowedGroups.includes(String(id)) && !removingTargets.has(`group:${id}`)
@@ -407,7 +398,6 @@ await threadReservations.start();
 sharedContextsReady = true;
 qzone.start();
 stickerCuration.start();
-dailyStyle.start();
 speakerGreetings.start();
 
 const seenMessages = new Map();
@@ -502,11 +492,12 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/qq/persona/catchphrases") {
     const body = parseJson(rawBody);
-    let staged;
-    try { staged = await personaStore.stageCatchphrases(body.catchphrases); }
+    let saved;
+    try { saved = await personaStore.stageCatchphrases(body.catchphrases); }
     catch (error) { throw new HttpError(400, error.message); }
-    recordEvent({ type: "persona-catchphrases-staged", count: staged.entries.length, activateAt: staged.activateAt, at: new Date().toISOString() });
-    sendJson(res, 200, { ...staged, persona: personaStore.publicState() });
+    codex.setSystemPrompt?.(personaStore.systemPromptForClient());
+    recordEvent({ type: "persona-catchphrases-updated", count: saved.entries.length, at: new Date().toISOString() });
+    sendJson(res, 200, { ...saved, persona: personaStore.publicState() });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/qq/stickers") {
@@ -934,7 +925,6 @@ async function handleOneBotEvent(payload) {
   if (!allowedGroups.includes(message.groupId) || removingTargets.has(`group:${message.groupId}`)) return {status:"ignored",reason:"Conversation was removed"};
   const stored = await store.appendMessage(message);
   if (!stored) return { status: "ignored", reason: "Message was recalled" };
-  await dailyStyle.capture(payload, stored).catch((error) => console.warn(`OWNER style capture failed: ${error.message}`));
   if (!allowedGroups.includes(message.groupId) || removingTargets.has(`group:${message.groupId}`)) return {status:"ignored",reason:"Conversation was removed"};
   recordEvent({ type: "message", groupId: stored.groupId, message: stored, at: new Date().toISOString() });
   const control = parseOwnerControlCommand(stored);
@@ -984,7 +974,6 @@ async function handleMessageRecall(payload) {
       return { status: "accepted", sourceGroupId: groupId, messageId, cancelledTargets: result.activeTargets };
     }
     const result = await store.recallMessage(groupId, messageId);
-    await dailyStyle.revokeMessage("group", groupId, messageId);
     await mediaManager.removeMessages(result.removedMessages);
     await mediaManager.removeImages(result.removedImages);
     recordEvent({ type: "message-recalled", groupId, messageId, at: now });
@@ -997,7 +986,6 @@ async function handleMessageRecall(payload) {
     return { status: "ignored", reason: "Private Agent chat is not configured" };
   }
   const result = await privateStore.recallMessage(userId, messageId);
-  await dailyStyle.revokeMessage("private", userId, messageId);
   await mediaManager.removeMessages(result.removedMessages);
   await mediaManager.removeImages(result.removedImages);
   recordEvent({ type: "private-message-recalled", userId, messageId, at: now });
@@ -1079,7 +1067,6 @@ async function handlePrivateMessage(payload) {
   privateMetadata[message.senderId] ||= { displayName: message.senderName || null };
   const stored = await privateStore.appendMessage(message);
   if (!stored) return { status: "ignored", reason: "Message was recalled" };
-  await dailyStyle.capture(payload, stored).catch((error) => console.warn(`OWNER style capture failed: ${error.message}`));
   if (targetAllowlist.isRemoved("private",message.senderId) || removingTargets.has(`private:${message.senderId}`)) return {status:"ignored",reason:"Conversation was removed"};
   recordEvent({ type: "private-message", userId: stored.senderId, message: stored, at: new Date().toISOString() });
   const control = parseOwnerControlCommand(stored);
@@ -1132,9 +1119,7 @@ async function hydrateMessage(payload, message) {
 
 function findSessionQuote(snapshot, messageId) {
   const id = String(messageId);
-  return snapshot.pendingMessages.find((item) => String(item.messageId) === id)
-    || [...(snapshot.recentTurns || [])].reverse().flatMap((turn) => turn.messages || [])
-      .find((item) => String(item.messageId) === id);
+  return snapshot.pendingMessages.find((item) => String(item.messageId) === id);
 }
 
 function quotedSummary(quoted) {
@@ -1306,7 +1291,7 @@ function publicState() {
     architecture: "target-owned-read-only-source-subscriptions",
     agentDispatch: agentDispatchStore.snapshot(),
     persona: personaStore.publicState(),
-    dailyStyle: dailyStyle.snapshot(),
+    taskGate: taskGate.snapshot(),
     ai: {
       provider: engineKind === "codex" ? "codex-app-server" : "workbuddy-agent-sdk",
       model: codexModel,
@@ -1468,7 +1453,6 @@ async function maintenanceState() {
       agentDispatch: agentDispatchStorePath,
       stickers: stickerStorePath,
       personaOwnerStyle: personaOwnerStylePath,
-      personaStyleSamples: personaStyleSamplesPath,
       mediaRoot,
       stickerLibrary: stickerLibraryDir
     }
@@ -1675,7 +1659,9 @@ function fallbackWorkBuddyModels(currentModel, currentEffort) {
 function referencedMedia() {
   const subscriptionState = subscriptionStore.snapshot();
   const sourceMedia = Object.values(subscriptionState.sources || {}).flatMap((source) => source.messages || []).flatMap((message) => [...(message.images || []), ...(message.attachments || [])]);
-  return [...store.referencedImages(), ...privateStore.referencedImages(), ...sourceMedia];
+  const pendingAttachments = [...store.listGroups(), ...privateStore.listGroups()]
+    .flatMap((group) => group.pendingMessages || []).flatMap((message) => message.attachments || []);
+  return [...store.referencedImages(), ...privateStore.referencedImages(), ...pendingAttachments, ...sourceMedia];
 }
 
 function publishTargetUpdate(keys) {
@@ -1695,15 +1681,10 @@ function recordEvent(event) {
     targetUpdateStream.queue(key);
     return;
   }
-  recentEvents.unshift(safeEvent(event));
+  const metadata = eventMetadata(event);
+  recentEvents.unshift(metadata);
   recentEvents.splice(100);
-  broadcast({ type: "event", event: safeEvent(event), state: publicState() });
-}
-
-function safeEvent(event) {
-  const copy = structuredClone(event);
-  if (copy.message) delete copy.message.imageRefs;
-  return copy;
+  broadcast({ type: "event", event: metadata, state: publicState() });
 }
 
 function broadcast(payload) {
@@ -1851,7 +1832,6 @@ async function shutdown() {
   qzone.stop();
   speakerGreetings.stop();
   stickerCuration.stop();
-  dailyStyle.stop();
   threadReservations.stop();
   clearInterval(subscriptionTimer);
   clearInterval(mediaCleanupTimer);

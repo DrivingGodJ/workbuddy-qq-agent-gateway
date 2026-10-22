@@ -544,8 +544,6 @@ export class PrivateWorker {
       this.store.assertReplyEnabled(userId);
       if (useMcpRead) {
         if (qqToolContext.failed) throw new Error("本轮 QQ 操作失败；待处理消息仍保留");
-        const silentScheduledCompletion = work.trigger.reason === "scheduled"
-          && qqToolContext.actionCount === 0 && qqToolContext.readCalled;
         if (!qqToolContext.readCalled) throw new Error("Agent 本轮未读取消息；待处理消息仍保留");
         const live = this.store.snapshot(userId).liveSession;
         const removedSourceMessages = this.subscriptionStore ? await this.subscriptionStore.completeClaims(contexts) : [];
@@ -554,8 +552,7 @@ export class PrivateWorker {
         const processed = await this.store.completeLiveConversation(userId, {
           turnId: result.turnId, trigger: work.trigger,
           bootstrapComplete: !result.compacted, bootstrapRevision: THREAD_INSTRUCTIONS_REVISION,
-          lastReadSequence: qqToolContext.lastReadSequence,
-          consumeReadWithoutReply: silentScheduledCompletion || qqToolContext.qzoneActionCount > 0
+          lastReadSequence: qqToolContext.lastReadSequence
         });
         await this.mediaManager.removeMessages([...processed, ...removedSourceMessages]);
         this.followup.publishWaiting(userId, { threadId, turnId: result.turnId });

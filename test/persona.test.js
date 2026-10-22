@@ -42,7 +42,7 @@ test("one shared persona keeps identity and safety without a per-turn runtime bl
   assert.match(prompt, /post_qzone/);
   assert.doesNotMatch(prompt, /小鲸鱼|DeepSeek|大肥鱼/);
   assert.doesNotMatch(prompt, /人格运行态|熟悉度|社交精力|最近人格反馈/);
-  assert.ok(prompt.length < 8000);
+  assert.ok(prompt.length < 12000);
 });
 
 test("different conversations add no dynamic persona text to their turn prompt", async (t) => {
@@ -64,21 +64,7 @@ test("different conversations add no dynamic persona text to their turn prompt",
   assert.doesNotMatch(store.previewPrompt(), /人格运行态|本轮社交精力|相关风格示例/);
 });
 
-test("published nightly style updates the shared persona without restoring per-turn state", async (t) => {
-  const { store, paths } = await fixture(t);
-  const before = store.systemPromptForClient();
-  await store.publishStyleRules(["短句优先，偶尔只回一两个字"]);
-  assert.notEqual(store.systemPromptForClient(), before);
-  assert.match(store.systemPromptForClient(), /短句优先，偶尔只回一两个字/);
-  assert.equal(store.targetState("group", "200000002").promptPreview,
-    store.targetState("private", "100000001").promptPreview);
-  const restored = new PersonaStore(paths);
-  await restored.init();
-  assert.equal(restored.systemPromptForClient(), store.systemPromptForClient());
-  await assert.rejects(restored.publishStyleRules(Array(6).fill("规则")), /长度上限/);
-});
-
-test("legacy long-term rule files are ignored, while nightly style remains shared", async (t) => {
+test("legacy long-term rule files are ignored without automatic style learning", async (t) => {
   const { store, paths } = await fixture(t);
   const legacyRulesPath = join(dirname(paths.ownerStylePath), "rules.json");
   const legacyRules = JSON.stringify({ rules: ["旧规则不再注入"] });
@@ -87,8 +73,8 @@ test("legacy long-term rule files are ignored, while nightly style remains share
   await restored.init();
   assert.doesNotMatch(restored.systemPromptForClient(), /旧规则不再注入|OWNER 教过的长期规则/);
   assert.equal(Object.hasOwn(restored.publicState(), "globalRules"), false);
-  await restored.publishStyleRules(["短句优先"]);
-  assert.match(restored.systemPromptForClient(), /短句优先/);
+  assert.equal(typeof restored.publishStyleRules, "undefined");
+  assert.equal(typeof restored.publishDailyUpdate, "undefined");
   assert.equal(await readFile(legacyRulesPath, "utf8"), legacyRules);
 });
 
@@ -107,7 +93,7 @@ test("legacy social-state files are neither read nor rewritten after migration",
   await writeFile(paths.relationshipsPath, legacy);
   const store = new PersonaStore(paths);
   await store.init();
-  await store.publishStyleRules(["保留每日总结"]);
+  await store.stageCatchphrases([{ text: "了解", when: "简短确认" }]);
   assert.equal(await readFile(paths.statePath, "utf8"), legacy);
   assert.equal(await readFile(paths.relationshipsPath, "utf8"), legacy);
   assert.doesNotMatch(JSON.stringify(store.publicState()), /secretOldState/);
@@ -131,30 +117,18 @@ test("nickname persists and changes both persona identity and text wake word", a
   await assert.rejects(store.setName("不 合法"), /昵称/);
 });
 
-test("edited catchphrases stay pending until next Shanghai 04:00 and can be cleared", async (t) => {
-  let now = new Date("2026-09-27T19:59:00Z");
+test("edited catchphrases apply immediately and can be cleared without a scheduled job", async (t) => {
   const { paths, store } = await fixture(t);
-  store.clock = () => now;
-  const initial = store.catchphrases();
-  const updated = [{ text: "这么好", when: "觉得有趣时自然说" }];
+  const updated = [{ text: "了解", when: "简短确认时自然说" }];
   const stage = await store.stageCatchphrases(updated);
-  assert.equal(stage.activateAt, "2026-09-27T20:00:00.000Z");
-  assert.deepEqual(store.catchphrases(), initial);
-  assert.deepEqual(store.publicState().pendingCatchphrases, updated);
-  assert.equal(store.pendingCatchphrasesDue("2026-09-27T19:59:59Z"), false);
-  assert.equal(store.pendingCatchphrasesDue("2026-09-27T20:00:00Z"), true);
+  assert.deepEqual(stage.entries, updated);
+  assert.deepEqual(store.catchphrases(), updated);
+  assert.equal(Object.hasOwn(store.publicState(), "pendingCatchphrases"), false);
   const restored = new PersonaStore(paths);
   await restored.init();
-  assert.deepEqual(restored.publicState().pendingCatchphrases, updated);
-  await restored.publishDailyUpdate({ cutoff: "2026-09-27T20:00:00Z" });
   assert.deepEqual(restored.catchphrases(), updated);
-  assert.equal(restored.publicState().pendingCatchphrases, null);
-  assert.match(restored.systemPromptForClient(), /- 这么好：觉得有趣时自然说/);
-  now = new Date("2026-09-27T20:01:00Z");
-  restored.clock = () => now;
+  assert.match(restored.systemPromptForClient(), /- 了解：简短确认时自然说/);
   await restored.stageCatchphrases([]);
-  assert.equal(restored.publicState().pendingCatchphrasesAt, "2026-09-28T20:00:00.000Z");
-  await restored.publishDailyUpdate({ cutoff: "2026-09-28T20:00:00Z" });
   assert.deepEqual(restored.catchphrases(), []);
   assert.doesNotMatch(restored.systemPromptForClient(), /固定口头禅/);
   await assert.rejects(restored.stageCatchphrases([{ text: "重复", when: "一" }, { text: "重复", when: "二" }]), /重复/);
@@ -164,7 +138,7 @@ test("scene examples are stable, bounded system instructions, never repeated per
   const { store } = await fixture(t);
   store.examples = Array.from({length:40}, (_,i)=>({situation:`情况${i}`,behavior:"自行判断是否有必要接话",examples:["一句短回复","老代不必跟读"]}));
   const prompt = store.systemPromptForClient();
-  const block = prompt.split("情境示范（")[1].split("兴趣倾向：")[0];
+  const block = prompt.split("情境对照（")[1].split("兴趣倾向：")[0];
   const examples = block.split("\n").filter(line=>line.includes(" → "));
   assert.equal(examples.length,MAX_PERSONA_EXAMPLES);
   assert.ok(examples.join("").length <= MAX_PERSONA_EXAMPLE_CHARS);
@@ -177,13 +151,11 @@ test("scene examples are stable, bounded system instructions, never repeated per
   t.after(()=>setAgentName("老代"));
 });
 
-test("unchanged daily summary preserves exact system prefix, but saves its completion time", async (t) => {
-  const {store,paths} = await fixture(t);
-  const rules = ["自然简短，先说结论"];
-  await store.publishStyleRules(rules);
+test("saving unchanged manual preferences preserves the exact system prefix", async (t) => {
+  const {store} = await fixture(t);
+  const entries = [{text:"了解",when:"简短确认"}];
+  await store.stageCatchphrases(entries);
   const before = store.systemPromptForClient();
-  assert.equal(await store.publishDailyUpdate({rules,cutoff:"2026-10-03T20:00:00Z",summarizedAt:"2026-10-03T20:01:00Z"}),false);
+  await store.stageCatchphrases(entries);
   assert.equal(store.systemPromptForClient(),before);
-  assert.equal(JSON.parse(await readFile(paths.ownerStylePath,"utf8")).styleSummarizedAt,"2026-10-03T20:01:00Z");
-  assert.equal(await store.publishDailyUpdate({rules:["允许单独表情或沉默"],cutoff:"2026-10-04T20:00:00Z"}),true);
 });

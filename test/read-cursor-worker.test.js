@@ -32,6 +32,7 @@ for (const [targetType, Worker] of [["group", GroupWorker], ["private", PrivateW
     const oldText = await append({ messageId: "old-text", text: "old plain text must not repeat" });
     let rounds = 0;
     const requests = [];
+    const removedBatches = [];
     const codex = {
       supportsQqMcp: true,
       supportsSystemPrompt: true,
@@ -62,7 +63,7 @@ for (const [targetType, Worker] of [["group", GroupWorker], ["private", PrivateW
     };
     const oneBot = new Proxy({}, { get: () => () => assert.fail("QQ transport must not run") });
     const worker = new Worker({
-      store, codex, oneBot, mediaManager: { async removeMessages(messages) { assert.deepEqual(messages, []); } },
+      store, codex, oneBot, mediaManager: { async removeMessages(messages) { removedBatches.push(messages.map((message) => message.messageId)); } },
       triggerManager: new TriggerManager({ store }), followupDurationMs: 1,
       sharedWorkspaceRoot: join(directory, "shared")
     });
@@ -71,7 +72,8 @@ for (const [targetType, Worker] of [["group", GroupWorker], ["private", PrivateW
     await worker.runAgent(targetId, await store.beginWork(targetId));
     assert.equal(rounds, 1);
     assert.equal(store.snapshot(targetId).deferredThroughSequence, oldText.sequence);
-    assert.equal(store.snapshot(targetId).pendingMessages.length, 2);
+    assert.equal(store.snapshot(targetId).pendingMessages.length, 0);
+    assert.deepEqual(removedBatches[0], ["old-owner", "old-text"]);
 
     const fresh = await append({ messageId: "fresh", text: "fresh member mention", mentionedBot: true,
       images: [{ localPath: newPath, mimeType: "image/png" }] });
@@ -82,7 +84,8 @@ for (const [targetType, Worker] of [["group", GroupWorker], ["private", PrivateW
     assert.equal(rounds, 2);
     assert.equal(requests.length, 2);
     assert.equal(store.snapshot(targetId).lastError, null);
-    assert.equal(store.snapshot(targetId).pendingMessages.length, 4);
+    assert.equal(store.snapshot(targetId).pendingMessages.length, 0);
+    assert.deepEqual(removedBatches[1], ["fresh", "quote"]);
     assert.equal(store.snapshot(targetId).deferredThroughSequence, 4);
   });
 }

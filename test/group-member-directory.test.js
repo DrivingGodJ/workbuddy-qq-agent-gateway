@@ -22,12 +22,16 @@ test("each group gets a private, durable QQ name index without message contents"
   await directory.record(speech(groupId, "222222222", "二号"), { nickname: "二号" });
   const state = JSON.parse(await readFile(file, "utf8"));
   assert.deepEqual(Object.keys(state.members).sort(), ["111111111", "222222222"]);
+  assert.deepEqual(directory.knownMemberIds(groupId).sort(), ["111111111", "222222222"]);
+  assert.deepEqual(directory.knownMemberIds("987654321"), [], "metadata cannot authorize members from another group");
   assert.equal(state.members["111111111"].displayName, "新昵称");
   assert.equal(state.members["111111111"].groupCard, null);
   assert.deepEqual(state.members["111111111"].knownNames, ["旧名", "新昵称", "群名片"]);
   assert.doesNotMatch(await readFile(file, "utf8"), /群里私人聊天内容/);
   assert.equal(await directory.record(speech(groupId, "111111111", "新昵称"), { nickname: "新昵称", card: "" }), false);
-  assert.equal(await new GroupMemberDirectory({ rootDir }).initGroup(groupId, []), false);
+  const restored = new GroupMemberDirectory({ rootDir });
+  assert.equal(await restored.initGroup(groupId, []), false);
+  assert.deepEqual(restored.knownMemberIds(groupId).sort(), ["111111111", "222222222"]);
   assert.equal(JSON.parse(await readFile(file, "utf8")).members["111111111"].displayName, "新昵称");
   assert.equal(await directory.initGroup("987654321"), true);
   assert.deepEqual(JSON.parse(await readFile(join(rootDir, "987654321", GROUP_MEMBER_DIRECTORY_FILE), "utf8")).members, {});

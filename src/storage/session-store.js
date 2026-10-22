@@ -154,10 +154,6 @@ export class SessionStore {
       return false;
     };
     for (const message of group.pendingMessages) if (redactQuote(message)) redactedPending.push(message);
-    for (const turn of group.recentTurns) {
-      turn.messages = (turn.messages || []).filter((message) => String(message.messageId) !== id);
-      turn.messages.forEach(redactQuote);
-    }
     if (String(group.pendingTrigger?.messageId || "") === id) group.pendingTrigger = null;
     const wasProcessing = [...removedMessages, ...redactedPending].some((message) => group.processing?.kind === "agent"
       && Number(message.sequence) <= Math.max(Number(group.processing.cutoffSequence || 0), Number(group.liveSession?.lastReadSequence || 0)));
@@ -475,15 +471,6 @@ export class SessionStore {
     group.lastActivityAt = this.nowIso();
     group.bootstrapComplete = Boolean(bootstrapComplete);
     if (bootstrapRevision != null) group.bootstrapRevision = Math.max(0, Math.floor(Number(bootstrapRevision) || 0));
-    group.recentTurns.push({
-      completedAt: this.nowIso(),
-      turnId: turnId || null,
-      trigger: trigger?.reason || null,
-      messages: (messages || processed).map(compactMessage),
-      reply: String(reply || ""),
-      status: "completed"
-    });
-    group.recentTurns = group.recentTurns.slice(-50);
     await this.save();
     return processed;
   }
@@ -525,7 +512,7 @@ export class SessionStore {
       observedSequence: latestObserved, messageId: confirmedMessageId, chatReply: Boolean(chatReply)
     }].slice(-30);
     if (confirmedMessageId) group.sentMessages = [...group.sentMessages.filter((item) => item.messageId !== confirmedMessageId), {
-      messageId: confirmedMessageId, kind: String(kind || "action"), summary: String(summary || "").slice(0, 500),
+      messageId: confirmedMessageId, kind: String(kind || "action"),
       sentAt: live.lastSentAt, recalledAt: null
     }].slice(-50);
     group.liveSession = live;
@@ -541,7 +528,7 @@ export class SessionStore {
     const at = this.nowIso();
     const confirmedMessageId = /^-?\d+$/u.test(String(messageId || "")) ? String(messageId) : null;
     if (confirmedMessageId) group.sentMessages = [...group.sentMessages.filter((item) => item.messageId !== confirmedMessageId), {
-      messageId: confirmedMessageId, kind: String(kind || "action"), summary: String(summary || "").slice(0, 500),
+      messageId: confirmedMessageId, kind: String(kind || "action"),
       sentAt: at, recalledAt: null
     }].slice(-50);
     if (chatReply) {
@@ -555,16 +542,16 @@ export class SessionStore {
 
   async completeLiveConversation(groupId, {
     turnId, trigger, bootstrapComplete = true, bootstrapRevision = null,
-    lastReadSequence = 0, consumeReadWithoutReply = false
+    lastReadSequence = 0
   } = {}) {
     const group = this.ensureGroup(groupId);
     if (!group.busy || group.processing?.kind !== "agent") throw new Error("No live Agent conversation is active");
     this.assertReplyEnabled(groupId);
     const live = group.liveSession;
     const sentCutoff = Math.max(0, Number(live?.lastSentSequence || 0));
-    const cutoff = consumeReadWithoutReply && sentCutoff === 0
-      ? Math.max(0, Number(lastReadSequence || 0))
-      : sentCutoff;
+    // A successful model round consumes what it actually read, even if it
+    // chose silence after its last send. Unread/new media and failed rounds stay.
+    const cutoff = Math.max(sentCutoff, Math.max(0, Number(lastReadSequence || 0)));
     const processed = group.pendingMessages.filter((message) => Number(message.sequence) <= cutoff);
     group.pendingMessages = group.pendingMessages.filter((message) => Number(message.sequence) > cutoff);
     if (cutoff && group.pendingTrigger?.sequence != null && Number(group.pendingTrigger.sequence) <= cutoff) {
@@ -580,12 +567,6 @@ export class SessionStore {
     );
     if (MESSAGE_WAKE_REASONS.has(group.pendingTrigger?.reason) && group.pendingTrigger?.sequence != null
       && Number(group.pendingTrigger.sequence) <= group.deferredThroughSequence) group.pendingTrigger = null;
-    group.recentTurns.push({
-      completedAt: this.nowIso(), turnId: turnId || null, trigger: trigger?.reason || null,
-      messages: processed.map(compactMessage), reply: String(live?.lastReply || ""),
-      status: "completed"
-    });
-    group.recentTurns = group.recentTurns.slice(-50);
     group.liveSession = null;
     group.busy = false;
     group.processing = null;
@@ -723,15 +704,6 @@ export class SessionStore {
     const processed = group.pendingMessages.filter((message) => message.sequence <= processing.cutoffSequence);
     group.pendingMessages = group.pendingMessages.filter((message) => message.sequence > processing.cutoffSequence);
     if (group.failedDelivery) {
-      group.recentTurns.push({
-        completedAt: this.nowIso(),
-        turnId: group.failedDelivery.turnId || null,
-        trigger: group.failedDelivery.trigger || "retry",
-        messages: processed.map(compactMessage),
-        reply: group.failedDelivery.displayReply || group.failedDelivery.reply,
-        status: processing.kind === "delivery" ? "delivered_after_retry" : "completed"
-      });
-      group.recentTurns = group.recentTurns.slice(-50);
       const completedReply = group.failedDelivery.displayReply || group.failedDelivery.reply;
       if (completedReply) {
         group.lastReply = completedReply;
@@ -954,9 +926,13 @@ function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
     group.bootstrapRevision = Math.max(0, Math.floor(Number(raw.bootstrapRevision) || 0));
     group.pendingMessages = Array.isArray(raw.pendingMessages) ? raw.pendingMessages : [];
     group.recalledMessageIds = Array.isArray(raw.recalledMessageIds) ? raw.recalledMessageIds.map(String).slice(-512) : [];
-    group.sentMessages = Array.isArray(raw.sentMessages) ? raw.sentMessages.filter((item) => /^-?\d+$/u.test(String(item?.messageId || ""))).slice(-50) : [];
+    group.sentMessages = Array.isArray(raw.sentMessages) ? raw.sentMessages
+      .filter((item) => /^-?\d+$/u.test(String(item?.messageId || ""))).slice(-50)
+      .map(({ messageId, kind, sentAt, recalledAt }) => ({ messageId, kind, sentAt, recalledAt })) : [];
     group.homeAssistantAttempts = normalizeHomeAssistantAttempts(raw.homeAssistantAttempts, nowMs);
-    group.recentTurns = Array.isArray(raw.recentTurns) ? raw.recentTurns.slice(-50) : [];
+    // Only WorkBuddy owns the durable transcript; the gateway keeps its small
+    // pending window and one panel reply, not another 50-turn chat history.
+    group.recentTurns = [];
     group.failedDelivery = raw.failedDelivery ? normalizeDelivery(raw.failedDelivery) : null;
     group.liveSession = raw.liveSession && typeof raw.liveSession === "object" ? {
       lastSentSequence: Math.max(0, Number(raw.liveSession.lastSentSequence || 0)),
@@ -970,19 +946,6 @@ function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
     group.periodicCheckedThroughSequence = Math.max(0, Number(raw.periodicCheckedThroughSequence || 0));
     if (group.lastCompletedReply?.text === LEGACY_EMPTY_REPLY_PLACEHOLDER) group.lastCompletedReply = null;
     if (group.lastReply === LEGACY_EMPTY_REPLY_PLACEHOLDER) group.lastReply = "";
-    if (!group.lastCompletedReply) {
-      const latestCompletedTurn = [...group.recentTurns].reverse().find((turn) => (
-        turn?.reply
-        && turn.reply !== LEGACY_EMPTY_REPLY_PLACEHOLDER
-        && turn?.completedAt
-      ));
-      if (latestCompletedTurn) {
-        group.lastCompletedReply = {
-          text: String(latestCompletedTurn.reply),
-          completedAt: latestCompletedTurn.completedAt
-        };
-      }
-    }
     if (group.lastError == null) group.resumeError = null;
     output.groups[groupId] = group;
     for (const message of group.pendingMessages) {

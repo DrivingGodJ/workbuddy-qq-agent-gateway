@@ -100,7 +100,7 @@ test("arrival at the exact quiet-window deadline does not trigger a followup", a
   assert.equal(fresh.followupWake, false);
   assert.equal(f.store.snapshot("12345").replyFollowup, null);
   assert.equal(f.store.snapshot("12345").pendingTrigger, null);
-  assert.equal(f.store.snapshot("12345").pendingMessages.length, 2);
+  assert.deepEqual(f.store.snapshot("12345").pendingMessages.map((message) => message.text), ["after quiet deadline"]);
 });
 
 test("a burst arriving before the old model exits queues one serial round and survives cleanup", async (t) => {
@@ -325,7 +325,7 @@ test("real group and private workers queue followups behind the active turn and 
     assert.equal(f.store.snapshot(id).lastError, null, Worker.name);
     assert.equal(runs, 1, Worker.name);
     assert.equal(f.store.snapshot(id).pendingTrigger.reason, "followup");
-    assert.equal(f.store.snapshot(id).pendingMessages.length, 2);
+    assert.deepEqual(f.store.snapshot(id).pendingMessages.map((message) => message.text), ["while previous model finishes"]);
     dispatch = true;
     await worker.kick(id);
     assert.equal(runs, 2, Worker.name);
@@ -427,7 +427,7 @@ test("an image arriving during active wait queues a fresh visual round when the 
   assert.equal(ctx.lastReadSequence, 1);
   await ctx.liveTool("end_conversation", {}, f.active);
   assert.equal(f.store.snapshot("12345").pendingTrigger.reason, "followup");
-  assert.deepEqual(await f.store.completeLiveConversation("12345", { lastReadSequence: ctx.lastReadSequence }), []);
+  assert.deepEqual((await f.store.completeLiveConversation("12345", { lastReadSequence: ctx.lastReadSequence })).map((message) => message.messageId), ["first"]);
   const next = await f.store.beginWork("12345");
   const visualContext = f.context(next);
   const read = await visualContext.liveTool("read_messages", {}, f.active);
@@ -516,7 +516,7 @@ test("late unmentioned messages received before model completion immediately get
   } });
   const run = f.worker.kick(f.id);
   await eventually(() => f.runs() === 2 && f.view().activeReply.waiting);
-  assert.equal(f.store.snapshot(f.id).pendingMessages.length, 2);
+  assert.equal(f.store.snapshot(f.id).pendingMessages.length, 0);
   await f.worker.cancel(f.id);
   await run;
   assert.equal(f.view().activeReply.status, "cancelled");
@@ -536,7 +536,7 @@ test("cancel button, master pause and per-conversation pause end the real observ
     assert.equal(f.runs(), 1);
     assert.equal(f.view().activeReply.running, false);
     assert.equal(f.store.snapshot(f.id).replyFollowup, null);
-    assert.equal(f.store.snapshot(f.id).pendingMessages.length, 1);
+    assert.equal(f.store.snapshot(f.id).pendingMessages.length, 0);
     assert.equal(f.store.messageEvents.listenerCount(f.id), 0);
   }
 });

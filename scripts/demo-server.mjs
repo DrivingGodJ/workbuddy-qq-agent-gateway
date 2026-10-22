@@ -33,8 +33,8 @@ const state = {
   agentDispatch: { enabled: true },
   persona: {
     name: "老代",
-    publishedStyle: { rules: ["短句优先，内容较长时自然断句"], summarizedAt: now },
-    promptPreview: "<laodai_persona>\n你是老代。所有会话共用同一份人格。\n每日表达总结：短句优先，内容较长时自然断句\n</laodai_persona>"
+    catchphrases: [{ text: "好", when: "简短确认时按需使用" }],
+    promptPreview: "<laodai_persona>\n你是老代。所有会话共用同一份固定人格。\n表达：简短自然，内容较长时按意群分句\n</laodai_persona>"
   },
   ai: { provider: "workbuddy-agent-sdk", model: "hy4-preview", reasoningEffort: "low",
     speakerGreetingsAvailable: process.env.DEMO_SPEAKER_GREETINGS_AVAILABLE !== "0",

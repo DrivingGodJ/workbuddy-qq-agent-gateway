@@ -88,6 +88,10 @@ export class GroupMemberDirectory {
     });
   }
 
+  knownMemberIds(groupId) {
+    return Object.keys(this.cache.get(String(groupId))?.members || {}).filter((id) => QQ_ID.test(id));
+  }
+
   enqueue(groupId, action) {
     const previous = this.chains.get(groupId) || Promise.resolve();
     const task = previous.catch(() => {}).then(action);

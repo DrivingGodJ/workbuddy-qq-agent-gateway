@@ -305,7 +305,7 @@ test("WorkBuddy Agent group final text never sends without the MCP send_message 
   await worker.kick("123");
   assert.equal(runs, 2);
   assert.deepEqual(sent, []);
-  assert.deepEqual(fixture.store.snapshot("123").pendingMessages.map((item) => item.messageId), ["group-final-only"]);
+  assert.deepEqual(fixture.store.snapshot("123").pendingMessages, []);
   assert.equal(fixture.store.snapshot("123").lastCompletedReply, null);
 });
 
@@ -1611,7 +1611,7 @@ test("group poke delivery retries only the unsent poke without rerunning the Age
   assert.equal(state.lastCompletedReply.text, "已戳一戳：456789");
 });
 
-test("group poke may target a member previously observed in the same group", async (t) => {
+test("group poke uses member identity metadata after processed chat history is cleared", async (t) => {
   const fixture = await createStoreFixture(t, ["123"]);
   const codex = new FakeCodex({ replyText: "记住你了。" });
   const pokes = [];
@@ -1627,17 +1627,19 @@ test("group poke may target a member previously observed in the same group", asy
     }
   });
 
-  const historic = await fixture.store.appendMessage(message("123", "poke-history-1", "我是老黄", {
-    senderId: "2799647436",
-    senderName: "老黄",
+  const historic = await fixture.store.appendMessage(message("123", "poke-history-1", "我是历史成员", {
+    senderId: "420000001",
+    senderName: "历史成员",
     trust: "UNTRUSTED",
     mentionedBot: true
   }));
   await fixture.store.requestTrigger("123", "mention", historic);
   await worker.kick("123");
 
-  codex.replyText = "这就戳一下。[[qq_poke:2799647436]]";
-  const current = await fixture.store.appendMessage(message("123", "poke-history-2", "戳一下老黄", {
+  assert.deepEqual(fixture.store.snapshot("123").recentTurns, []);
+  worker.knownMemberIds = (groupId) => groupId === "123" ? ["420000001"] : [];
+  codex.replyText = "这就戳一下。[[qq_poke:420000001]]";
+  const current = await fixture.store.appendMessage(message("123", "poke-history-2", "戳一下历史成员", {
     senderId: OWNER_QQ_ID,
     trust: "OWNER",
     mentionedBot: true
@@ -1645,7 +1647,7 @@ test("group poke may target a member previously observed in the same group", asy
   await fixture.store.requestTrigger("123", "mention", current);
   await worker.kick("123");
 
-  assert.deepEqual(pokes, [["123", "2799647436"]]);
+  assert.deepEqual(pokes, [["123", "420000001"]]);
   assert.equal(fixture.store.snapshot("123").lastCompletedReply.text, "这就戳一下。");
 });
 

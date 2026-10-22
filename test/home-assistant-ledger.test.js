@@ -42,7 +42,7 @@ test("claims survive display-history truncation, normal turn completion and relo
   assert.equal(f.store.snapshot("12345").liveSession.actions.some((entry) => entry.kind === "home_assistant_attempt"), false);
   await f.store.completeLiveConversation("12345", { lastReadSequence: message.sequence });
   assert.equal(f.store.snapshot("12345").liveSession, null);
-  assert.equal(f.store.snapshot("12345").pendingMessages.length, 1);
+  assert.equal(f.store.snapshot("12345").pendingMessages.length, 0);
   const reloaded = new SessionStore({ filePath: f.filePath, clock: f.clock });
   await reloaded.init();
   await assert.rejects(reloaded.claimHomeActionAttempt("12345", key), /不能重复执行/);

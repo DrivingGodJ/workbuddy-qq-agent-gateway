@@ -966,7 +966,7 @@ test("WorkBuddy Agent private final text never sends without the MCP send_messag
   await worker.kick(OWNER_QQ_ID);
   assert.equal(runs, 2);
   assert.deepEqual(sent, []);
-  assert.deepEqual(fixture.privateSessions.snapshot(OWNER_QQ_ID).pendingMessages.map((item) => item.messageId), ["private-final-only"]);
+  assert.deepEqual(fixture.privateSessions.snapshot(OWNER_QQ_ID).pendingMessages, []);
   assert.equal(fixture.privateSessions.snapshot(OWNER_QQ_ID).lastCompletedReply, null);
 });
 

@@ -48,12 +48,13 @@ for (const type of ["group","private"]) {
     assert.equal(result.removed,true);
     assert.equal(result.threadId,"demo-persistent-thread");
     assert.equal(result.subscriptionCount,1);
-    assert.deepEqual(result.removedMessages,[],"another subscriber still needs the notification");
+    assert.deepEqual(result.removedMessages.map((message) => message.messageId),["own-message"],"only the deleted target media is released; another subscriber still needs the source notification");
     assert.deepEqual(f.targetStore.snapshot(ids.other),other);
     assert.equal(f.targetStore.listGroups().some((item) => item.groupId === id),false);
     assert.equal(f.allowlist.list(type).includes(id),false);
     const archive = JSON.parse(await readFile(result.archiveFile,"utf8"));
-    assert.equal(archive.conversation.pendingMessages[0].messageId,"own-message");
+    assert.equal(Object.hasOwn(archive.conversation,"pendingMessages"),false);
+    assert.equal(archive.version,2);
     assert.equal(archive.conversation.threadId,"demo-persistent-thread");
     assert.equal(archive.subscriptions.length,1);
     assert.equal(archive.qzoneBinding.targetId,id);

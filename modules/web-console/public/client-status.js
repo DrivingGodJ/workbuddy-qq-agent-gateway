@@ -64,8 +64,8 @@ export function conversationStatus(data, state = {}, now = Date.now()) {
       : active.trigger === "subscription_auto" ? "正在整理订阅通知" : "模型正在生成或思考";
     return { short: stage === "tool" ? "用工具" : "生成中", detail, tone: "running" };
   }
-  if (active.status === "queued" || data?.pendingTrigger && state.dailyStyle?.gate?.blocked) {
-    const maintenance = state.dailyStyle?.status === "running" ? "人格总结" : state.qq?.stickers?.curation?.status === "running" ? "表情筛选" : "前序任务";
+  if (active.status === "queued" || data?.pendingTrigger && state.taskGate?.blocked) {
+    const maintenance = state.qq?.stickers?.curation?.status === "running" ? "表情筛选" : "前序任务";
     return { short: "排队中", detail: `任务排队 · 等待${maintenance}，消息仍保留`, tone: "pending" };
   }
   if (data?.threadLock?.status === "external_writer") return { short: "被占用", detail: "会话被其他写入端占用 · 网关自动重试", tone: "attention" };

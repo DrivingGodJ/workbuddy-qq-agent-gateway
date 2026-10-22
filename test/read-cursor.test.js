@@ -59,17 +59,18 @@ async function fixture(t, targetType = "group") {
     const { context } = await f.begin();
     while (context.lastReadSequence < sequence) assert.equal((await f.read(context)).isError, false);
     assert.equal(context.lastReadSequence, sequence);
-    assert.deepEqual(await f.complete(context), []);
+    const expected = f.store.snapshot(targetId).pendingMessages.filter((message) => message.sequence <= sequence).map((message) => message.sequence);
+    assert.deepEqual((await f.complete(context)).map((message) => message.sequence), expected);
   };
   return f;
 }
 
-test("group and private prefetch skip committed retained pages and see a new mention after restart", async (t) => {
+test("group and private prefetch skip consumed pages and see a new mention after restart", async (t) => {
   for (const targetType of ["group", "private"]) {
     const f = await fixture(t, targetType);
     await f.appendMany(85);
     await f.silentlyReadThrough(85);
-    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 85);
+    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 0);
     await f.restart();
     const newest = await f.append("newest mention", { mentionedBot: true });
     const { context, pages } = await f.begin();
@@ -78,20 +79,20 @@ test("group and private prefetch skip committed retained pages and see a new men
     assert.match(prepared, /newest mention/);
     assert.doesNotMatch(prepared, /message-1\b|message-40\b|message-85\b/);
     assert.equal(context.lastReadSequence, 86);
-    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 86);
+    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 1);
   }
 });
 
-test("each successful silent page advances the durable cursor without deleting pending history", async (t) => {
+test("each successful silent page advances the durable cursor and deletes only consumed messages", async (t) => {
   const f = await fixture(t);
   await f.appendMany(85);
   for (const [first, last] of [[1, 40], [41, 80], [81, 85]]) {
     const { context, pages } = await f.begin();
     assert.equal((await f.read(context)).isError, false);
     assert.deepEqual(pages[0], Array.from({ length: last - first + 1 }, (_, index) => first + index));
-    assert.deepEqual(await f.complete(context), []);
+    assert.deepEqual((await f.complete(context)).map((message) => message.sequence), Array.from({ length: last - first + 1 }, (_, index) => first + index));
     assert.equal(f.store.snapshot(f.targetId).deferredThroughSequence, last);
-    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 85);
+    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 85 - last);
     await f.restart();
   }
 });
@@ -117,7 +118,7 @@ test("failed and cancelled rounds replay fresh reads but not earlier successful 
     }
     if (failure !== "process restart") await f.store.failWork(f.targetId, new Error(failure));
     assert.equal(f.store.snapshot(f.targetId).deferredThroughSequence, 45, failure);
-    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 90, failure);
+    assert.equal(f.store.snapshot(f.targetId).pendingMessages.length, 45, failure);
     await f.restart();
     const retry = await f.begin();
     assert.equal((await f.read(retry.context)).isError, false);
@@ -126,7 +127,7 @@ test("failed and cancelled rounds replay fresh reads but not earlier successful 
   }
 });
 
-test("partial send consumes only its confirmed cutoff and commits later silent reads for next pagination", async (t) => {
+test("normal completion consumes confirmed sends and later silent reads for next pagination", async (t) => {
   const f = await fixture(t);
   await f.appendMany(45);
   await f.silentlyReadThrough(45);
@@ -139,9 +140,9 @@ test("partial send consumes only its confirmed cutoff and commits later silent r
   await f.read(context);
   assert.equal(context.lastReadSequence, 125);
   const processed = await f.complete(context);
-  assert.equal(processed.length, 85);
+  assert.equal(processed.length, 80);
   assert.deepEqual(f.store.snapshot(f.targetId).pendingMessages.map((message) => message.sequence),
-    Array.from({ length: 45 }, (_, index) => 86 + index));
+    [126, 127, 128, 129, 130]);
   assert.equal(f.store.snapshot(f.targetId).deferredThroughSequence, 125);
   await f.restart();
   const next = await f.begin();
@@ -165,8 +166,8 @@ test("same-thread resume preserves read and periodic cursors while replacing the
   assert.equal(f.store.snapshot(f.targetId).periodicCheckedThroughSequence, 0);
   const { context, pages } = await f.begin();
   await f.read(context);
-  assert.equal(pages[0][0], 1);
-  assert.equal(context.lastReadSequence, 40);
+  assert.deepEqual(pages[0], [46], "resetting a thread cannot resurrect discarded gateway history");
+  assert.equal(context.lastReadSequence, 46);
 });
 
 test("standalone scheduled tasks can read pending without borrowing or changing the chat cursor", async (t) => {
@@ -178,7 +179,7 @@ test("standalone scheduled tasks can read pending without borrowing or changing 
   const { context, pages } = f.context({ scheduledTask: true });
   assert.equal(context.lastReadSequence, 0);
   await f.read(context);
-  assert.deepEqual(pages[0], Array.from({ length: 40 }, (_, index) => index + 1));
+  assert.deepEqual(pages[0], [46]);
   assert.equal((await context.liveTool("send_message", { text: "scheduled message" }, f.active)).isError, false);
   assert.equal((await context.liveTool("end_conversation", {}, f.active)).isError, false);
   const after = f.store.snapshot(f.targetId);

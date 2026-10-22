@@ -143,7 +143,7 @@ test("UI states distinguish compaction, countdown, maintenance queue and errors"
   const waiting = conversationStatus({activeReply:{running:true,waiting:true,waitUntil:new Date(120000).toISOString()}},{},60000);
   assert.match(waiting.detail,/1:00/);
   assert.match(waiting.detail,/不调用模型/);
-  assert.match(conversationStatus({activeReply:{status:"queued"}},{dailyStyle:{status:"running"}}).detail,/人格总结/);
+  assert.match(conversationStatus({activeReply:{status:"queued"}},{taskGate:{blocked:true},qq:{stickers:{curation:{status:"running"}}}}).detail,/表情筛选/);
   assert.equal(conversationStatus({lastError:"failed"}).short,"失败");
   assert.equal(conversationStatus({activeReply:{running:true}},{agentDispatch:{enabled:false}}).short,"已暂停");
   assert.equal(conversationStatus({qzoneActivity:{kind:"feed",stage:"queued"}}).short,"动态排队");

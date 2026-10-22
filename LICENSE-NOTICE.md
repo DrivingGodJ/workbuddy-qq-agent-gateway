@@ -7,3 +7,5 @@ GitHub 对公开仓库提供查看与派生机制，不等同于获得任意修�
 完整开源许可需先获得上游授权或由上游添加明确许可证，再明确新增贡献的许可。本说明不改变原作者或依赖项目的权利。
 
 QQ、SnowLuma、WorkBuddy、CodeBuddy、Codex 及 SDK 的条款分别适用，不附带这些产品、模型访问权或第三方表情素材。
+
+老代人格中的部分群友反应与聊天节奏参考 Derpyu520/qq-bridge 的小鲸鱼角色卡及二代预设；该部分来源与 MIT 许可见 [persona/QQ-BRIDGE-NOTICE.txt](persona/QQ-BRIDGE-NOTICE.txt)，不改变本项目其他代码的许可状态。
