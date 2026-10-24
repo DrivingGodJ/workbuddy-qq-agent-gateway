@@ -232,6 +232,7 @@ export function createLiveConversationTools({
         if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭。", true);
         store.assertReplyEnabled(targetId);
         snapshot = store.snapshot(targetId);
+        // Both tools drain the same unread timeline (including SELF) before waiting.
         if (!context.readCalled || unreadConversationMessages(snapshot).length) break;
         if (Date.now() >= deadline) break;
         if (store.waitForNewMessages) await store.waitForNewMessages(targetId, {

@@ -86,6 +86,83 @@ test("incoming messages during a send and the confirmed self message share one c
   assert.equal(f.store.snapshot(GROUP).pendingMessages.length, 0);
 });
 
+for (const type of ["group", "private"]) {
+  const target = type === "group" ? GROUP : A;
+  test(`${type}: active wait immediately drains unread input and SELF in the same order as read_messages`, async (t) => {
+    const f = await fixture(t, type, target);
+    await f.call("read_messages");
+    const method = type === "group" ? "sendGroupMessage" : "sendPrivateMessage";
+    const normal = f.oneBot[method];
+    f.oneBot[method] = async (...args) => {
+      await f.append(type, target, "102", "arrived before send confirmation");
+      return normal(...args);
+    };
+    await f.call("send_message", { text: "my own reply" });
+    await f.append(type, target, "103", "arrived after my reply");
+    f.store.waitForNewMessages = () => assert.fail("existing unread messages must never start a wait");
+    const result = text(await f.call("wait_for_messages", { seconds: 30 }));
+    assert.ok(result.indexOf("arrived before send confirmation") < result.indexOf("my own reply"));
+    assert.ok(result.indexOf("my own reply") < result.indexOf("arrived after my reply"));
+    assert.match(result, /SELF 已发送/);
+    assert.doesNotMatch(result, /origin message/);
+    const snapshot = f.store.snapshot(target);
+    assert.equal(snapshot.pendingMessages.length, 3, "read acknowledgement is not deletion");
+    assert.ok([...snapshot.pendingMessages, ...snapshot.outgoingMessages].every((m) => m.readAt));
+    assert.doesNotMatch(text(await f.call("read_messages")), /my own reply|arrived before|arrived after/);
+  });
+
+  test(`${type}: SELF alone returns without waiting, then an empty unread queue actually waits`, async (t) => {
+    const f = await fixture(t, type, target);
+    await f.call("read_messages");
+    await f.call("send_message", { text: "just sent by me" });
+    let waits = 0;
+    f.store.waitForNewMessages = async () => {
+      waits++;
+      await f.append(type, target, "104", "fresh reply while waiting");
+    };
+    const self = text(await f.call("wait_for_messages", { seconds: 30 }));
+    assert.equal(waits, 0);
+    assert.match(self, /just sent by me/);
+    assert.match(self, /本批只有你已发送的消息/);
+    const reply = text(await f.call("wait_for_messages", { seconds: 30 }));
+    assert.equal(waits, 1);
+    assert.match(reply, /fresh reply while waiting/);
+    assert.doesNotMatch(reply, /just sent by me/);
+  });
+}
+
+test("active wait drains existing unread pages without waiting or repeating an earlier page", async (t) => {
+  const f = await fixture(t);
+  await f.call("read_messages");
+  for (let n = 0; n < 45; n++) await f.append("group", GROUP, String(200 + n), `unread item ${n}`);
+  await f.call("send_message", { text: "self after the unread batch" });
+  f.store.waitForNewMessages = () => assert.fail("unread pagination must not wait");
+  const first = text(await f.call("wait_for_messages", { seconds: 30 }));
+  assert.match(first, /unread item 39/);
+  assert.doesNotMatch(first, /unread item 40|self after/);
+  const second = text(await f.call("wait_for_messages", { seconds: 30 }));
+  assert.match(second, /unread item 40/);
+  assert.match(second, /self after the unread batch/);
+  assert.doesNotMatch(second, /unread item 39/);
+  assert.equal(toPublicGroupState(f.store.snapshot(GROUP)).unreadCount, 0);
+});
+
+test("active wait preserves the same unseen-image boundary and later SELF receipt as direct reads", async (t) => {
+  const f = await fixture(t);
+  await f.call("read_messages");
+  await f.append("group", GROUP, "102", "before new image");
+  await f.append("group", GROUP, "103", "new unseen image", { images: [{ localPath: "/synthetic/new.png" }] });
+  await f.call("send_message", { text: "self after the new image" });
+  f.store.waitForNewMessages = () => assert.fail("an unseen image must not start a wait");
+  const result = text(await f.call("wait_for_messages", { seconds: 30 }));
+  assert.match(result, /before new image/);
+  assert.doesNotMatch(result, /new unseen image|self after the new image/);
+  assert.match(result, /新图片未作为视觉输入/);
+  assert.equal(f.context.deferredNewMedia, true);
+  assert.ok(!f.store.snapshot(GROUP).pendingMessages.find((m) => m.messageId === "103").readAt);
+  assert.ok(!f.store.snapshot(GROUP).outgoingMessages[0].readAt);
+});
+
 test("prefetch lists per-channel freshness without reading or clearing another private chat", async (t) => {
   const f = await fixture(t);
   await f.append("private", A, "201", "private A text");

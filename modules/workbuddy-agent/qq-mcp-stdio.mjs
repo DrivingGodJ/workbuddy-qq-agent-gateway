@@ -86,7 +86,7 @@ const allTools = [
   },
   {
     name: "wait_for_messages",
-    description: "主动等待当前 QQ 会话的新消息，最多 30 秒；新消息到达立即唤醒并读取，不等倒计时结束，没等到可再次等待。等待期间 pending 不清理。先调用 read_messages。",
+    description: "与 read_messages 共用未读增量：若已有未读，立即按原顺序返回，包括你已发送的 SELF 消息，不进入等待；只有没有未读时才等新消息，最多 30 秒，收到即返回。读取后标记已读，下次不重复；pending 不清理。SELF 仅供定位发言时间，不要回复自己。先调用 read_messages。",
     inputSchema: { type: "object", properties: { seconds: { type: "integer", minimum: 1, maximum: 30, description: "本次最多等待多少秒" } }, required: ["seconds"], additionalProperties: false }
   },
   {
