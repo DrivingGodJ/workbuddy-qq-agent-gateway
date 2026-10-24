@@ -210,12 +210,15 @@ export function createLiveConversationTools({
     if (name === "end_conversation") {
       if (!scheduledTask && !context.readCalled) return answer("请先调用 read_messages 读取当前消息，再决定结束。", true);
       if (!scheduledTask && !context.ended) await store.armReplyFollowup(targetId, {
+        afterSequence: context.lastReadSequence,
         deferredImageAfterSequence: context.deferredNewMedia ? context.lastReadSequence : null
       });
       context.ended = true;
       return answer(scheduledTask
         ? "本次定时模型轮次已结束；读取过的聊天消息仍留在原来的待处理队列，后续任务继续按顺序执行。"
-        : "本轮结束；网关观察两分钟，有新消息会重新唤醒你自行判断是否回复，安静两分钟才退出。请直接结束模型轮次，不再输出发送正文。");
+        : store.snapshot(targetId).pendingMessages.some((message) => !message.readAt && !message.isSelf)
+          ? "本轮结束；已有未读消息已排入续接队列，当前模型轮次结束后按队列立即处理，不等待新消息或两分钟倒计时。请直接结束模型轮次，不再输出发送正文。"
+          : "本轮结束；网关观察两分钟，有新消息会重新唤醒你自行判断是否回复，安静两分钟才退出。请直接结束模型轮次，不再输出发送正文。");
     }
     if (name === "read_messages" || name === "wait_for_messages") {
       const activeWait = name === "wait_for_messages";

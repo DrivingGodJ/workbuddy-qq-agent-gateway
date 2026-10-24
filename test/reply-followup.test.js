@@ -121,6 +121,57 @@ test("a burst arriving before the old model exits queues one serial round and su
   assert.deepEqual(next.messages.map((message) => message.messageId), arrivals.map((message) => message.messageId));
 });
 
+for (const type of ["group", "private"]) {
+  test(`${type}: explicit end immediately queues already-unread input without a later arrival`, async (t) => {
+    const f = await fixture(t, type);
+    const work = await f.store.beginWork("12345");
+    const ctx = f.context(work);
+    await ctx.liveTool("read_messages", {}, f.active);
+    await ctx.liveTool("send_message", { text: "first reply" }, f.active);
+    await f.append("arrived before explicit end");
+    const ended = await ctx.liveTool("end_conversation", {}, f.active);
+    assert.match(ended.content[0].text, /已有未读消息已排入续接队列/);
+    assert.equal(f.store.snapshot("12345").pendingTrigger.reason, "followup");
+    assert.equal(f.store.snapshot("12345").replyFollowup, null, "do not start an empty two-minute wait");
+    assert.equal(await f.store.beginWork("12345"), null, "continuation cannot overlap the active model round");
+    await f.store.completeLiveConversation("12345", { lastReadSequence: ctx.lastReadSequence });
+    const next = await f.store.beginWork("12345");
+    assert.equal(next.trigger.reason, "followup");
+    assert.deepEqual(next.messages.map((m) => m.messageId), ["arrived before explicit end"]);
+  });
+}
+
+test("explicit end continues an unread page but never reactivates acknowledged input or SELF receipts", async (t) => {
+  const f = await fixture(t);
+  for (let n = 0; n < 44; n++) await f.append(`unread-${n}`);
+  const ctx = f.context(await f.store.beginWork("12345"));
+  await ctx.liveTool("read_messages", {}, f.active);
+  await ctx.liveTool("end_conversation", {}, f.active);
+  assert.equal(f.store.snapshot("12345").pendingTrigger.reason, "followup");
+  await f.store.completeLiveConversation("12345", { lastReadSequence: ctx.lastReadSequence });
+  const next = await f.store.beginWork("12345");
+  assert.equal(next.messages.length, 5);
+  const second = f.context(next);
+  await second.liveTool("read_messages", {}, f.active);
+  await second.liveTool("send_message", { text: "second reply" }, f.active);
+  const acknowledgedElsewhere = await f.append("already read elsewhere");
+  await f.store.markMessagesRead("12345", [acknowledgedElsewhere]);
+  await second.liveTool("end_conversation", {}, f.active);
+  assert.equal(f.store.snapshot("12345").pendingTrigger, null);
+  assert.ok(f.store.snapshot("12345").replyFollowup);
+  assert.ok(f.store.snapshot("12345").outgoingMessages.some((m) => !m.readAt));
+});
+
+test("explicit end catches a bot poke before intake has registered its immediate trigger", async (t) => {
+  const f = await fixture(t);
+  const ctx = f.context(await f.store.beginWork("12345"));
+  await ctx.liveTool("read_messages", {}, f.active);
+  await f.append("poke:already-unread", { eventType: "poke", mentionedBot: true });
+  await ctx.liveTool("end_conversation", {}, f.active);
+  assert.equal(f.store.snapshot("12345").pendingTrigger.reason, "followup");
+  assert.equal(f.store.snapshot("12345").pendingTrigger.messageId, "poke:already-unread");
+});
+
 test("a late mention upgrade of an active followup cannot swallow the next visual round", async (t) => {
   for (const targetType of ["group", "private"]) {
     const f = await fixture(t, targetType);
@@ -524,6 +575,26 @@ test("late unmentioned messages received before model completion immediately get
   await run;
   assert.equal(f.view().activeReply.status, "cancelled");
   assert.equal(f.view().activeReply.running, false);
+});
+
+test("real group and private workers resume unread input immediately after explicit end", async (t) => {
+  for (const Worker of [GroupWorker, PrivateWorker]) {
+    const f = await automaticWorker(t, Worker, { duringTurn: async (current, round, ctx) => {
+      if (round !== 1) return;
+      await current.append("already unread at explicit end");
+      await ctx.liveTool("end_conversation", {}, current.active);
+      assert.equal(current.store.snapshot(current.targetId).pendingTrigger.reason, "followup");
+    } });
+    const run = f.worker.kick(f.id);
+    try {
+      await eventually(() => f.runs() === 2 && f.view().activeReply.waiting);
+      assert.equal(f.store.snapshot(f.id).pendingMessages.length, 0);
+      assert.equal(f.runs(), 2, "one queued continuation, not parallel or repeated activations");
+    } finally {
+      await f.worker.cancel(f.id);
+      await run;
+    }
+  }
 });
 
 test("cancel button, master pause and per-conversation pause end the real observation without another AI call", async (t) => {

@@ -303,7 +303,7 @@ export class SessionStore {
     // Program-controlled completion also catches messages received while the
     // model was finishing, even when they did not @ the bot.
     const unread = afterSequence == null ? null : group.pendingMessages.find((message) =>
-      Number(message.sequence) > Number(afterSequence) && !(message.eventType === "poke" && message.mentionedBot));
+      !message.readAt && !message.isSelf && Number(message.sequence) > Number(afterSequence));
     if (unread) {
       group.replyFollowup = null;
       group.pendingTrigger = strongerTrigger(group.pendingTrigger, makeTrigger("followup", unread, now.toISOString()));

@@ -154,7 +154,7 @@ const allTools = [
     inputSchema: { type: "object", properties: { path: { type: "string", description: "本机绝对路径" } }, required: ["path"], additionalProperties: false }
   },
   {
-    name: "end_conversation", description: "兼容结束工具。通常直接结束模型轮次即可，不要为了沉默或开启等待专门调用；网关自动等待两分钟接话。调用后直接结束，不输出确认文字。",
+    name: "end_conversation", description: "兼容结束工具。通常直接结束模型轮次即可，不要为了沉默或开启等待专门调用；仍有未读消息时网关会立即排队续接，没有未读才等待两分钟接话，SELF 不触发。调用后直接结束，不输出确认文字。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
   },
   {
