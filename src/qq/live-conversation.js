@@ -5,7 +5,7 @@ import { QQ_FACE_ALIASES } from "./file-directive.js";
 import { AGENT_QQ_ID, OWNER_QQ_ID, sanitizeGroupReply } from "../security/policy.js";
 import { QqMessageReader, MESSAGE_READER_TOOLS } from "./message-reader.js";
 import { readGroupManagement, manageGroup } from "./group-management.js";
-import { conversationActivityWindow, conversationReadSequence } from "../groups/group-state.js";
+import { conversationReadSequence, unreadConversationMessages } from "../groups/group-state.js";
 import { homeAssistantRequest } from "../automation/home-assistant.js";
 
 const PAGE_SIZE = 40;
@@ -85,9 +85,10 @@ export function createLiveConversationTools({
     scheduledQzonePost: scheduledTask,
     qzoneReadCalled: false,
     readCalled: false,
-    // Only successfully completed rounds commit this cursor. An interrupted
-    // liveSession read is not an acknowledgement and must be replayed.
-    lastReadSequence: scheduledTask ? 0 : conversationReadSequence(store.snapshot(targetId)),
+    // Read acknowledgements live on the shared message state, independently
+    // of the successful-processing cutoff retained here for cleanup.
+    lastReadSequence: scheduledTask ? 0 : Math.max(conversationReadSequence(store.snapshot(targetId)),
+      Number(store.snapshot(targetId).liveSession?.lastReadSequence || 0)),
     actionCount: 0,
     managementActionCount: (store.snapshot(targetId).liveSession?.actions || [])
       .filter((item) => item.kind === "group_management").length,
@@ -104,6 +105,7 @@ export function createLiveConversationTools({
   const qzoneFeeds = new Map();
   const homeReadIds = new Set();
   const homeAttempts = new Set();
+  context.completeSharedReads = () => readSharedContext?.complete?.() || [];
 
   const currentQzoneMessages = () => [...(triggerMessages || []),
     ...currentOwnerQzoneMessages(store, messageReader, targetId)];
@@ -123,6 +125,18 @@ export function createLiveConversationTools({
       if (!context.readCalled) return answer("请先读取当前会话消息，再查看关联渠道上下文。", true);
       if (!readSharedContext) return answer("当前会话尚未关联共享上下文；不能读取其他渠道。");
       return readSharedContext(args, active);
+    }
+    if (name === "send_context_message") {
+      if (!context.readCalled) return answer("请先读取当前会话，再选择关联渠道发送。", true);
+      if (!readSharedContext?.send) return answer("当前没有可发送的关联渠道。", true);
+      const result = await readSharedContext.send(args, active);
+      if (result.deliveryUncertain) context.failed = true;
+      if (!result.isError) {
+        context.actionCount += 1;
+        context.displayedActions.push(`[已发送到关联渠道 ${args.target_type}:${args.target_id}]`);
+        try { active?.onDelta?.("", context.displayedActions.join("\n\n")); } catch { /* delivery is already confirmed */ }
+      }
+      return result;
     }
     if (["read_home_devices", "control_home_device", "speak_home_speaker"].includes(name)) {
       if (!context.readCalled) return answer("请先读取当前会话消息，再使用家居工具。", true);
@@ -218,7 +232,7 @@ export function createLiveConversationTools({
         if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭。", true);
         store.assertReplyEnabled(targetId);
         snapshot = store.snapshot(targetId);
-        if (!context.readCalled || snapshot.pendingMessages.some((message) => Number(message.sequence) > context.lastReadSequence)) break;
+        if (!context.readCalled || unreadConversationMessages(snapshot).length) break;
         if (Date.now() >= deadline) break;
         if (store.waitForNewMessages) await store.waitForNewMessages(targetId, {
           afterSequence: context.lastReadSequence, timeoutMs: deadline - Date.now(),
@@ -226,23 +240,23 @@ export function createLiveConversationTools({
         });
         else await pause(Math.min(250, deadline - Date.now()));
       } while (true);
-      const activity = conversationActivityWindow(snapshot);
-      const fresh = activity.pendingMessages.filter((message) => Number(message.sequence) > context.lastReadSequence);
+      const fresh = unreadConversationMessages(snapshot);
       const firstBlockedMedia = fresh.findIndex((message) =>
         Number(message.sequence) > initialImageSequence && (message.images || []).some((image) => image.localPath)
       );
       const readable = (firstBlockedMedia < 0 ? fresh : fresh.slice(0, firstBlockedMedia)).slice(0, PAGE_SIZE);
       const first = !context.readCalled;
       if (firstBlockedMedia >= 0) context.deferredNewMedia = true;
-      const previousReply = first && activity.lastCompletedReply?.text
-        ? `【上一次完整回答】${activity.lastCompletedReply.messageId ? ` [消息 ID ${activity.lastCompletedReply.messageId}]` : ""}\n${activity.lastCompletedReply.text}`
-        : "";
       const activeMessages = [...messageReader.messages.values(), ...readable];
-      const output = [previousReply, renderMessages(readable, { first, snapshot, activeMessages })].filter(Boolean).join("\n\n");
-      messageReader.capture(readable);
+      const output = renderMessages(readable, { first, snapshot, activeMessages });
+      if (active?.cancelRequested || !canRun()) return answer("本轮已停止，消息未标记已读。", true);
+      messageReader.capture(readable.filter((message) => !message.isSelf));
       if (first) messageReader.capture(readOnlyContextMessages);
       if (readable.length) {
-        context.lastReadSequence = Number(readable.at(-1).sequence);
+        await store.markMessagesRead?.(targetId, readable);
+        try { onEvent({ type: "messages-read", targetType, targetId, at: new Date().toISOString() }); } catch { /* acknowledgement is already durable */ }
+        context.lastReadSequence = Math.max(context.lastReadSequence,
+          Number(readable.filter((message) => !message.isSelf).at(-1)?.sequence || 0));
         if (!scheduledTask) await store.markLiveReadSequence(targetId, context.lastReadSequence);
         for (const message of readable) {
           const id = String(message.senderId || "");
@@ -264,7 +278,12 @@ export function createLiveConversationTools({
       else if (firstBlockedMedia >= 0) notes.push("后面还有新图片未作为视觉输入提供；请结束本轮，图片和其后的消息会保留给下一轮。");
       else if (fresh.length > readable.length) notes.push("还有未读取的消息；请再次调用 read_messages。");
       if (!readable.length && firstBlockedMedia < 0) notes.push("目前没有新消息；可以继续等待，也可以结束本轮。");
-      if (scheduledTask) notes.push("这是定时任务按需读取的当前会话消息；不会标记为已处理，也不会清理 pending。");
+      if (readable.length && readable.every((message) => message.isSelf)) notes.push("本批只有你已发送的消息，用于确认时间顺序，不需要回复自己。");
+      if (first && readSharedContext) {
+        const status = await readSharedContext({}, active);
+        if (!status.isError) notes.push(`【关联渠道新消息状态】\n${status.content.filter((item) => item.type === "text").map((item) => item.text).join("\n")}`);
+      }
+      if (scheduledTask) notes.push("这是定时任务按需读取：已标记已读，不重复返回；未标记处理完成，不清理 pending。");
       return answer([output, ...notes].filter(Boolean).join("\n\n"));
     }
     if (name === "recall_message") {

@@ -70,7 +70,9 @@ export function conversationStatus(data, state = {}, now = Date.now()) {
   }
   if (data?.threadLock?.status === "external_writer") return { short: "被占用", detail: "会话被其他写入端占用 · 网关自动重试", tone: "attention" };
   if (data?.lastError || active.error) return { short: "失败", detail: "本轮失败 · 消息和发送记录保留", tone: "error" };
-  if (data?.pendingCount) return { short: String(data.pendingCount), detail: `${data.pendingCount} 条消息等待处理`, tone: "pending" };
+  const unread = data?.unreadCount ?? data?.pendingCount ?? 0;
+  if (unread) return { short: String(unread), detail: `${unread} 条新消息尚未读取`, tone: "pending" };
+  if (data?.pendingCount) return { short: "已读", detail: "消息已读 · 原消息保留到处理完成，不再重复输入", tone: "idle" };
   if (data?.speakerGreetingActivity) return speakerGreetingStatus(data.speakerGreetingActivity);
   const silent = diagnostics?.stage === "complete" && data?.lastCompletedReply?.completedAt
     && diagnostics.startedAtMs > Date.parse(data.lastCompletedReply.completedAt);

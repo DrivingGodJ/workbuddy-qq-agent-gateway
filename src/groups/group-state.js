@@ -7,8 +7,14 @@ export function conversationReadSequence(group) {
 export function conversationActivityWindow(group) {
   return {
     lastCompletedReply: group.lastCompletedReply || null,
-    pendingMessages: group.pendingMessages || []
+    pendingMessages: group.pendingMessages || [],
+    messageTimeline: [...(group.pendingMessages || []), ...(group.outgoingMessages || [])]
+      .sort((a, b) => Number(a.sequence) - Number(b.sequence))
   };
+}
+
+export function unreadConversationMessages(group) {
+  return conversationActivityWindow(group).messageTimeline.filter((message) => !message.readAt);
 }
 
 export function toPublicGroupState(group, live = null, metadata = {}) {
@@ -27,6 +33,7 @@ export function toPublicGroupState(group, live = null, metadata = {}) {
     lastActivityAt: group.lastActivityAt,
     ...activity,
     pendingCount: activity.pendingMessages.length,
+    unreadCount: activity.pendingMessages.filter((message) => !message.readAt).length,
     busy: group.busy || waiting,
     pendingTrigger: group.pendingTrigger,
     processingUntilMessageId: group.processing?.processingUntilMessageId || null,

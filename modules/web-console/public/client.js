@@ -697,7 +697,7 @@ function renderConversation(item) {
 
   const data = item.data;
   const active = getActiveReply(data);
-  const relevantState = { lastCompletedReply: data.lastCompletedReply, pendingMessages: data.pendingMessages, processing: data.processing, activeReply: active, qzoneActivity: data.qzoneActivity, speakerGreetingActivity: data.speakerGreetingActivity, lastError: data.lastError, failedDelivery: data.failedDelivery };
+  const relevantState = { lastCompletedReply: data.lastCompletedReply, pendingMessages: data.pendingMessages, messageTimeline: data.messageTimeline, processing: data.processing, activeReply: active, qzoneActivity: data.qzoneActivity, speakerGreetingActivity: data.speakerGreetingActivity, lastError: data.lastError, failedDelivery: data.failedDelivery };
   const signature = `${item.key}:${agentName()}:${JSON.stringify(relevantState)}`;
   if (renderedKey === item.key && conversationSignature === signature) return;
   const structure = JSON.stringify({ ...relevantState, activeReply: { ...active, text: undefined, updatedAt: undefined } });
@@ -716,13 +716,15 @@ function renderConversation(item) {
   }
   conversationStructureSignature = structure;
   const blocks = [];
-  if (data.lastCompletedReply?.text) {
+  const timeline = data.messageTimeline || data.pendingMessages || [];
+  if (data.lastCompletedReply?.text && !timeline.some((message) => message.isSelf && message.text === data.lastCompletedReply.text)) {
     blocks.push(`<section class="conversation-section last-reply"><div class="section-label"><span>上一次完整回答</span><time>${formatTime(data.lastCompletedReply.completedAt)}</time></div>${renderReply(data.lastCompletedReply.text)}</section>`);
   }
-  if ((data.pendingMessages || []).length) {
+  if (timeline.length) {
     const cutoff = data.processing?.kind === "agent" ? Number(data.processing.cutoffSequence || 0) : 0;
-    const label = item.kind === "private" ? "尚未处理的私聊消息" : "尚未处理的群消息";
-    blocks.push(`<section class="conversation-section pending-section"><div class="section-label"><span>${label}</span><span>${data.pendingMessages.length} 条${cutoff ? " · 回复成功后提交" : ""}</span></div><div class="message-stack">${data.pendingMessages.map((message) => renderMessage(message, Number(message.sequence || 0) <= cutoff)).join("")}</div></section>`);
+    const label = item.kind === "private" ? "私聊活动消息" : "群聊活动消息";
+    const unread = data.unreadCount ?? (data.pendingMessages || []).filter((message) => !message.readAt).length;
+    blocks.push(`<section class="conversation-section pending-section"><div class="section-label"><span>${label}</span><span>${unread} 条未读 · 已读不重复输入${cutoff ? " · 原消息保留到本轮结束" : ""}</span></div><div class="message-stack">${timeline.map((message) => renderMessage(message, !message.isSelf && Number(message.sequence || 0) <= cutoff)).join("")}</div></section>`);
   }
   if (data.qzoneActivity) {
     const activity = data.qzoneActivity;
@@ -845,6 +847,7 @@ function replaceConversation(html, signature, forceBottom, key = "") {
 }
 
 function renderMessage(message, processing = false, source = false) {
+  if (message.isSelf && !source) return `<article class="bubble agent"><div class="bubble-meta"><strong>${escapeHtml(agentName())} · 已发送</strong><span>${escapeHtml(message.displayTime || formatTime(message.timestamp))}</span></div><div class="bubble-text">${escapeHtml(message.text || "（无文字）")}</div><div class="message-state resolved">${message.readAt ? "已读 · 已进入上下文" : "下次读取时按时间顺序提供"}</div></article>`;
   const media = [
     ...(message.images || []).map((image) => image.error ? "图片下载失败" : `图片 · ${formatBytes(image.size)}`),
     ...(message.attachments || []).map((attachment) => attachment.error ? `${attachment.name || "附件"} · 缓存失败` : `${attachment.name || "附件"} · ${attachment.localPath ? "已缓存" : "未缓存"}`)
@@ -855,7 +858,7 @@ function renderMessage(message, processing = false, source = false) {
   const sourceState = message.retainedBySubscription
     ? `仍被 ${Number(message.pendingSubscriberCount || 0)} 个订阅会话引用 · 全部处理后清理`
     : "近期上下文缓冲 · 不等待发送";
-  return `<article class="bubble user ${message.trust === "OWNER" && !source ? "owner" : "untrusted"} ${processing ? "processing" : ""}"><div class="bubble-meta"><strong>${escapeHtml(sender)}${escapeHtml(role)}</strong><span>${escapeHtml(message.displayTime || formatTime(message.timestamp))}</span></div><div class="bubble-text">${escapeHtml(message.text || "（无文字）")}</div>${attachments}<div class="message-state${source && !message.retainedBySubscription ? " resolved" : ""}">${source ? escapeHtml(sourceState) : processing ? "处理中 · 回复成功后移除" : "等待处理"}</div></article>`;
+  return `<article class="bubble user ${message.trust === "OWNER" && !source ? "owner" : "untrusted"} ${processing ? "processing" : ""}"><div class="bubble-meta"><strong>${escapeHtml(sender)}${escapeHtml(role)}</strong><span>${escapeHtml(message.displayTime || formatTime(message.timestamp))}</span></div><div class="bubble-text">${escapeHtml(message.text || "（无文字）")}</div>${attachments}<div class="message-state${message.readAt || source && !message.retainedBySubscription ? " resolved" : ""}">${source ? escapeHtml(sourceState) : message.readAt ? "已读 · 后续读取不重复提供" : processing ? "处理中 · 尚未读取" : "未读 · 等待读取"}</div></article>`;
 }
 
 function renderReply(text) {

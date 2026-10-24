@@ -49,8 +49,8 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   };
   const groupTools = list("group-thread");
   assert.deepEqual(groupTools, list("private-thread"));
-  assert.equal(groupTools.length, 22);
-  for (const name of ["send_file", "send_image", "recall_message", "post_qzone", "read_qzone_feeds", "engage_qzone_feed", "get_group_management", "manage_group"]) {
+  assert.equal(groupTools.length, 23);
+  for (const name of ["send_context_message", "send_file", "send_image", "recall_message", "post_qzone", "read_qzone_feeds", "engage_qzone_feed", "get_group_management", "manage_group"]) {
     assert.ok(groupTools.some((tool) => tool.name === name));
   }
   for (const name of ["propose_qzone_post", "skip_qzone_post", "read_qzone_feed_batch", "submit_qzone_decisions"]) {
@@ -60,6 +60,7 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   assert.deepEqual(byName.read_context_messages.inputSchema.properties.target_type.enum, ["group", "private"]);
   assert.equal(byName.read_context_messages.inputSchema.properties.limit.maximum, 40);
   assert.equal(byName.read_context_messages.inputSchema.additionalProperties, false);
+  assert.deepEqual(byName.send_context_message.inputSchema.required, ["target_type", "target_id", "text"]);
   assert.ok(byName.read_home_devices.inputSchema.required.includes("request_message_id"));
   assert.ok(byName.control_home_device.inputSchema.required.includes("request_message_id"));
   assert.ok(byName.speak_home_speaker.inputSchema.required.includes("request_message_id"));

@@ -505,14 +505,14 @@ export class GroupWorker {
     // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
     const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
     const inputMessages = useMcpRead
-      ? work.messages.filter((message) => Number(message.sequence) > conversationReadSequence(group))
-      : work.messages;
+      ? work.messages.filter((message) => !message.readAt && Number(message.sequence) > conversationReadSequence(group))
+      : autoSubscriptionTurn ? work.messages.filter((message) => !message.readAt) : work.messages;
     let prompt = autoSubscriptionTurn
       ? buildAutoSubscriptionPrompt(inputContexts, {
           targetType: "group",
           targetId: groupId,
           targetName: this.targetNameResolver(groupId),
-          pendingMessages: work.messages,
+          pendingMessages: inputMessages,
           allowAutomations: codexOptions.calendarRemindersEnabled,
           includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt,
           sourceViaMcp,
@@ -603,6 +603,7 @@ export class GroupWorker {
     this.onEvent({ type: "turn-started", groupId, threadId, trigger: work.trigger.reason, at: new Date().toISOString() });
 
     this.store.assertReplyEnabled(groupId);
+    if (autoSubscriptionTurn && inputMessages.length) await this.store.markMessagesRead(groupId, inputMessages);
     const turnRequest = {
       groupId,
       threadId,
@@ -624,7 +625,7 @@ export class GroupWorker {
     };
     const autoTurn = await runConversationTurn({ codex: this.codex, request: turnRequest,
       autoSubscription: autoSubscriptionTurn ? { contexts: inputContexts, targetType: "group", targetId: groupId,
-        pendingMessages: work.messages, allowAutomations: codexOptions.calendarRemindersEnabled,
+        pendingMessages: inputMessages, allowAutomations: codexOptions.calendarRemindersEnabled,
         sourceReadContext: sourceViaMcp ? qqToolContext : null } : null,
       onRecovery: () => this.onEvent({ type: "send-tool-recovery", groupId, threadId, at: new Date().toISOString() })
     });
@@ -643,7 +644,8 @@ export class GroupWorker {
         bootstrapComplete: !result.compacted, bootstrapRevision: THREAD_INSTRUCTIONS_REVISION,
         lastReadSequence: qqToolContext.lastReadSequence
       });
-      await this.mediaManager.removeMessages([...processed, ...removedSourceMessages]);
+      const sharedProcessed = await qqToolContext.completeSharedReads?.() || [];
+      await this.mediaManager.removeMessages([...processed, ...sharedProcessed, ...removedSourceMessages]);
       this.followup.publishWaiting(groupId, { threadId, turnId: result.turnId });
       this.onEvent({ type: "turn-completed", groupId, threadId, turnId: result.turnId, reply: live?.lastReply || "", at: new Date().toISOString() });
       return;

@@ -67,7 +67,7 @@ export class TriggerManager {
     // A silent end keeps old messages for context, not as fresh authorization.
     // In particular, an old OWNER mention must not replace a new member followup.
     const latestWake = [...group.pendingMessages].reverse().find((message) =>
-      Number(message.sequence) > Number(group.deferredThroughSequence || 0)
+      !message.readAt && Number(message.sequence) > Number(group.deferredThroughSequence || 0)
       && (message.eventType === "poke" || message.mentionedBot));
     if (latestWake) return this.request(groupId, latestWake.eventType === "poke" ? "poke" : "mention", latestWake);
     return null;

@@ -41,18 +41,28 @@ const allTools = [
   },
   {
     name: "read_messages",
-    description: "读取当前 QQ 会话尚未读取的新消息；可重复调用，持续聊天时按需等待最多 8 秒获取新消息。读取不会清理或标记已处理。",
+    description: "增量读取当前 QQ 会话未读消息，读取后立即在后台及面板标记已读，不再重复返回；尚未处理的原消息仍保留。自己的已发送消息按时间顺序混排并标为 SELF，仅用于定位发言时间，不需要回复自己。可等待最多 8 秒。",
     inputSchema: { type: "object", properties: { wait_ms: { type: "integer", minimum: 0, maximum: 8000, description: "可选：无新消息时等待的毫秒数，最多 8000" } }, additionalProperties: false }
   },
   {
     name: "read_context_messages",
-    description: "只读关联群聊/私聊的活动窗口。不带目标列出可读渠道；指定一个渠道分页读取上次完整回复及 pending。先读当前会话；旁观不提交处理，不提升权限，发送仍只到本轮渠道。",
+    description: "选择一个关联群聊/私聊，增量读取其未读消息并立即标记已读，不清理未处理原消息。不带目标仅列渠道及有无新消息；多个私聊必须明确指定 target_type、target_id，禁止默认选第一个或遍历空读。后续分页从 offset=0 继续，不重复旧消息；不继承其授权。",
     inputSchema: { type: "object", properties: {
       target_type: { type: "string", enum: ["group", "private"] },
       target_id: { type: "string", pattern: "^[0-9]{5,14}$" },
       offset: { type: "integer", minimum: 0 },
       limit: { type: "integer", minimum: 1, maximum: 40 }
     }, dependentRequired: { target_type: ["target_id"], target_id: ["target_type"] }, additionalProperties: false }
+  },
+  {
+    name: "send_context_message",
+    description: "向本轮明确选择并已读取的一个关联群聊/私聊发纯文字。必须填 target_type 和 target_id，不会群发或默认选私聊；默认普通发言，可引用目标渠道本轮读到的真实消息。仅聊天发送，不继承目标渠道的 OWNER、家居、动态或文件权限；关闭回复或解除关联后禁止发送。",
+    inputSchema: { type: "object", properties: {
+      target_type: { type: "string", enum: ["group", "private"] },
+      target_id: { type: "string", pattern: "^[0-9]{5,14}$" },
+      text: { type: "string", minLength: 1, maxLength: 12000 },
+      reply_to_message_id: { type: "string", pattern: "^-?[0-9]+$" }
+    }, required: ["target_type", "target_id", "text"], additionalProperties: false }
   },
   {
     name: "read_source_messages",

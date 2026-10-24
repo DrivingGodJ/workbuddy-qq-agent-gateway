@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { EventEmitter } from "node:events";
+import { formatLocalTime } from "../qq/message-normalizer.js";
 
 // A due subscription queues behind the active turn, then runs before later
 // ordinary wake-ups. Delivery retries and explicit controls still take precedence.
@@ -174,6 +175,46 @@ export class SessionStore {
     await this.save();
   }
 
+  /** Read acknowledgements are durable, but never delete pending input on failure. */
+  async markMessagesRead(groupId, messages) {
+    const group = this.ensureGroup(groupId);
+    const sequences = new Set(messages.map((message) => Number(message.sequence)));
+    const at = this.nowIso();
+    let changed = false;
+    for (const message of [...group.pendingMessages, ...group.outgoingMessages]) {
+      if (!message.readAt && sequences.has(Number(message.sequence))) {
+        message.readAt = at;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    if (MESSAGE_WAKE_REASONS.has(group.pendingTrigger?.reason)
+      && !group.pendingMessages.some((message) => !message.readAt
+        && Number(message.sequence) === Number(group.pendingTrigger.sequence))) group.pendingTrigger = null;
+    await this.save();
+    this.messageEvents.emit(String(groupId));
+  }
+
+  async completeAcknowledgedMessages(groupId) {
+    const group = this.ensureGroup(groupId);
+    const processed = group.pendingMessages.filter((message) => message.readAt);
+    group.pendingMessages = group.pendingMessages.filter((message) => !message.readAt);
+    group.outgoingMessages = group.outgoingMessages.filter((message) => !message.readAt);
+    await this.save();
+    this.messageEvents.emit(String(groupId));
+    return processed;
+  }
+
+  recordOutgoingMessage(group, { summary, messageId, kind, at }) {
+    if (messageId && group.outgoingMessages.some((message) => message.messageId === messageId)) return;
+    group.outgoingMessages.push({
+      groupId: group.groupId, messageId: messageId || `self:${this.state.nextSequence}`,
+      sequence: this.state.nextSequence++, senderId: "self", senderName: "自己", trust: "SELF",
+      isSelf: true, source: "qq_self", kind, text: String(summary || "").slice(0, 12000),
+      timestamp: at, displayTime: formatLocalTime(new Date(at)), receivedAt: at, readAt: null
+    });
+  }
+
   async invalidateActiveWorkForRecall(groupId) {
     const group = this.ensureGroup(groupId);
     if (!group.busy || group.processing?.kind !== "agent") return false;
@@ -192,6 +233,7 @@ export class SessionStore {
     const sent = group.sentMessages.find((item) => String(item.messageId) === String(messageId));
     if (!sent || sent.recalledAt) return false;
     sent.recalledAt = this.nowIso();
+    group.outgoingMessages = group.outgoingMessages.filter((message) => String(message.messageId) !== String(messageId));
     if (group.liveSession) {
       for (const action of group.liveSession.actions || []) {
         if (String(action.messageId) === String(messageId)) action.recalledAt = sent.recalledAt;
@@ -355,7 +397,7 @@ export class SessionStore {
       Number(startupSequence || 0),
       processingCutoff
     );
-    const latest = [...group.pendingMessages].reverse().find((message) => Number(message.sequence) > lastChecked);
+    const latest = [...group.pendingMessages].reverse().find((message) => !message.readAt && Number(message.sequence) > lastChecked);
     if (!latest) return null;
     const sequence = Number(latest.sequence);
     const candidate = {
@@ -515,6 +557,7 @@ export class SessionStore {
       messageId: confirmedMessageId, kind: String(kind || "action"),
       sentAt: live.lastSentAt, recalledAt: null
     }].slice(-50);
+    if (chatReply) this.recordOutgoingMessage(group, { summary, messageId: confirmedMessageId, kind, at: live.lastSentAt });
     group.liveSession = live;
     group.lastActivityAt = live.lastSentAt;
     await this.save();
@@ -522,9 +565,9 @@ export class SessionStore {
   }
 
   /** A scheduled Space turn may chat without consuming or acknowledging pending QQ input. */
-  async recordStandaloneActionSent(groupId, { kind, summary = "", chatReply = true, messageId = null } = {}) {
+  async recordStandaloneActionSent(groupId, { kind, summary = "", chatReply = true, messageId = null, confirmedDelivery = false } = {}) {
     const group = this.ensureGroup(groupId);
-    this.assertReplyEnabled(groupId);
+    if (!confirmedDelivery) this.assertReplyEnabled(groupId);
     const at = this.nowIso();
     const confirmedMessageId = /^-?\d+$/u.test(String(messageId || "")) ? String(messageId) : null;
     if (confirmedMessageId) group.sentMessages = [...group.sentMessages.filter((item) => item.messageId !== confirmedMessageId), {
@@ -533,7 +576,8 @@ export class SessionStore {
     }].slice(-50);
     if (chatReply) {
       group.lastReply = String(summary || "").slice(0, 12000);
-      group.lastCompletedReply = { text: group.lastReply, completedAt: at };
+      group.lastCompletedReply = { text: group.lastReply, completedAt: at, messageId: confirmedMessageId };
+      this.recordOutgoingMessage(group, { summary, messageId: confirmedMessageId, kind, at });
     }
     group.lastActivityAt = at;
     await this.save();
@@ -552,8 +596,9 @@ export class SessionStore {
     // A successful model round consumes what it actually read, even if it
     // chose silence after its last send. Unread/new media and failed rounds stay.
     const cutoff = Math.max(sentCutoff, Math.max(0, Number(lastReadSequence || 0)));
-    const processed = group.pendingMessages.filter((message) => Number(message.sequence) <= cutoff);
-    group.pendingMessages = group.pendingMessages.filter((message) => Number(message.sequence) > cutoff);
+    const processed = group.pendingMessages.filter((message) => message.readAt || Number(message.sequence) <= cutoff);
+    group.pendingMessages = group.pendingMessages.filter((message) => !message.readAt && Number(message.sequence) > cutoff);
+    group.outgoingMessages = group.outgoingMessages.filter((message) => !message.readAt);
     if (cutoff && group.pendingTrigger?.sequence != null && Number(group.pendingTrigger.sequence) <= cutoff) {
       group.pendingTrigger = null;
     }
@@ -779,6 +824,8 @@ export class SessionStore {
     if (group.threadId !== nextThreadId) {
       group.deferredThroughSequence = 0;
       group.periodicCheckedThroughSequence = 0;
+      for (const message of group.pendingMessages) delete message.readAt;
+      group.outgoingMessages = [];
     }
     group.threadId = nextThreadId;
     group.replyFollowup = null;
@@ -846,6 +893,13 @@ export class SessionStore {
     const group = this.ensureGroup(groupId);
     group.deferredThroughSequence = Math.max(0, Number(cursor.deferredThroughSequence) || 0);
     group.periodicCheckedThroughSequence = Math.max(0, Number(cursor.periodicCheckedThroughSequence) || 0);
+    const acknowledgements = new Map([...(cursor.pendingMessages || []), ...(cursor.outgoingMessages || [])]
+      .map((message) => [Number(message.sequence), message.readAt]));
+    for (const message of [...group.pendingMessages, ...group.outgoingMessages]) {
+      const readAt = acknowledgements.get(Number(message.sequence));
+      if (readAt) message.readAt = readAt;
+      else delete message.readAt;
+    }
     await this.save();
   }
 
@@ -885,6 +939,7 @@ function createGroupState(groupId, defaultCodexConfig = null) {
     bootstrapRevision: 0,
     migratedFromLegacy: false,
     pendingMessages: [],
+    outgoingMessages: [],
     recalledMessageIds: [],
     sentMessages: [],
     homeAssistantAttempts: [],
@@ -925,6 +980,8 @@ function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
       : null;
     group.bootstrapRevision = Math.max(0, Math.floor(Number(raw.bootstrapRevision) || 0));
     group.pendingMessages = Array.isArray(raw.pendingMessages) ? raw.pendingMessages : [];
+    group.outgoingMessages = Array.isArray(raw.outgoingMessages)
+      ? raw.outgoingMessages.filter((message) => message?.isSelf && Number.isSafeInteger(message.sequence) && message.sequence > 0) : [];
     group.recalledMessageIds = Array.isArray(raw.recalledMessageIds) ? raw.recalledMessageIds.map(String).slice(-512) : [];
     group.sentMessages = Array.isArray(raw.sentMessages) ? raw.sentMessages
       .filter((item) => /^-?\d+$/u.test(String(item?.messageId || ""))).slice(-50)
@@ -948,7 +1005,7 @@ function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
     if (group.lastReply === LEGACY_EMPTY_REPLY_PLACEHOLDER) group.lastReply = "";
     if (group.lastError == null) group.resumeError = null;
     output.groups[groupId] = group;
-    for (const message of group.pendingMessages) {
+    for (const message of [...group.pendingMessages, ...group.outgoingMessages]) {
       output.nextSequence = Math.max(output.nextSequence, Number(message.sequence || 0) + 1);
     }
   }

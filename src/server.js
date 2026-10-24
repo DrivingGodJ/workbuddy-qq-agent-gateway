@@ -351,6 +351,7 @@ for (const targetWorker of [worker, privateWorker]) {
   targetWorker.sharedContexts = sharedContexts;
   targetWorker.readSharedContextFor = (targetType, targetId) => createSharedContextReader({
     sharedContexts, groupStore: store, privateStore, targetType, targetId,
+    oneBot, onEvent: recordEvent,
     groupNameResolver: (id) => groupMetadata[id]?.groupName,
     privateNameResolver: (id) => privateMetadata[id]?.displayName,
     canRead: (type, id) => targetWorker.canRun(targetId) && (type === "group"

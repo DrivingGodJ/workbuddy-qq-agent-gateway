@@ -127,6 +127,19 @@ const tiles = new Map([
   ["demo-hmm",["?","#a3a5ef"]],["demo-no",["NO","#d895ac"]],
   ["demo-loading",["…","#80a7b8"]],["demo-blocked",["—","#aab2b9"]]
 ]);
+if (process.env.DEMO_INCREMENTAL_MESSAGES === "1") {
+  const demo = state.qq.groups["200000001"];
+  demo.pendingMessages[0].sequence = 10;
+  demo.pendingMessages[0].readAt = now;
+  demo.pendingMessages[0].displayTime = "12:20:01";
+  demo.pendingMessages[1].sequence = 30;
+  demo.pendingMessages[1].displayTime = "12:20:03";
+  demo.unreadCount = 1;
+  demo.messageTimeline = [demo.pendingMessages[0], msg(20, "老代", "我先核对一下尺寸", {
+    isSelf: true, trust: "SELF", senderId: "self", displayTime: "12:20:02", readAt: null
+  }), demo.pendingMessages[1]];
+}
+
 const server = createServer(async (req,res) => {
   const path = new URL(req.url,"http://localhost").pathname;
   res.setHeader("Cache-Control","no-store");

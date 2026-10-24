@@ -139,12 +139,14 @@ test("private scheduled Qzone tasks queue on the group lane, inherit model conte
   const f = await fixture(t);
   const entered = f.gate();
   const release = f.gate();
+  let privateReadCount = 0;
   f.codex.behavior = async (request) => {
     if (request.groupId === GROUP) { entered.resolve(); await release.promise; }
     else {
       const read = await request.qqToolContext.liveTool("read_messages", {}, {});
       assert.equal(read.isError, false);
-      assert.match(read.content[0].text, /private-pending-kept/u);
+      if (++privateReadCount === 1) assert.match(read.content[0].text, /private-pending-kept/u);
+      else assert.doesNotMatch(read.content[0].text, /private-pending-kept/u);
     }
   };
   await f.append("private", "private-pending-kept", { mentionedBot: false });

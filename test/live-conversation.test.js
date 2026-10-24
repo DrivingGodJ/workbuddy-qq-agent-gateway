@@ -77,7 +77,7 @@ test("initial prefetch uses the same bounded reader without clearing pending or 
   assert.deepEqual(sent, [["text", "直接回复首批"]]);
 });
 
-test("group and private prefetch use the panel activity window, not hidden sent history", async (t) => {
+test("group and private prefetch include unread self receipts from the panel timeline exactly once", async (t) => {
   for (const targetType of ["group", "private"]) {
     const f = await fixture(t);
     await f.store.recordLiveActionSent("12345", {
@@ -100,7 +100,9 @@ test("group and private prefetch use the panel activity window, not hidden sent 
     const prepared = await prepareLiveConversationPrompt(context, "本轮权限");
     assert.ok(prepared.includes(view.lastCompletedReply.text));
     for (const message of view.pendingMessages) assert.ok(prepared.includes(message.text));
-    assert.doesNotMatch(prepared, /已经处理的旧回复|最近由你成功发出的消息|"tool"|"content"/);
+    assert.ok(view.messageTimeline.some((message) => message.isSelf && message.text === "已经处理的旧回复"));
+    assert.match(prepared, /已经处理的旧回复/);
+    assert.doesNotMatch(prepared, /最近由你成功发出的消息|"tool"|"content"/);
     assert.equal(prepared.match(/面板上的上一次完整回答/g)?.length, 1);
     assert.equal(context.lastReadSequence, pending.sequence);
     assert.equal(f.store.snapshot("12345").pendingMessages.length, 1);
@@ -111,15 +113,17 @@ test("group and private prefetch use the panel activity window, not hidden sent 
   }
 });
 
-test("prefetch never substitutes hidden lastReply when the panel has no completed reply", async (t) => {
+test("prefetch includes visible sent receipts but never substitutes a hidden lastReply string", async (t) => {
   const f = await fixture(t);
   await f.store.recordLiveActionSent("12345", {
     kind: "message", summary: "未完成的已发送动作", observedSequence: 1, messageId: "703"
   });
   assert.equal(toPublicGroupState(f.store.snapshot("12345")).lastCompletedReply, null);
+  f.store.ensureGroup("12345").lastReply = "hidden legacy lastReply";
   const prepared = await prepareLiveConversationPrompt(f.context, "任务");
   assert.match(prepared, /第一句/);
-  assert.doesNotMatch(prepared, /未完成的已发送动作|上一次完整回答|最近由你成功发出的消息/);
+  assert.match(prepared, /未完成的已发送动作/);
+  assert.doesNotMatch(prepared, /hidden legacy lastReply|上一次完整回答|最近由你成功发出的消息/);
 });
 
 test("group and private MCP sends preserve AI punctuation, line breaks and emoji", async (t) => {

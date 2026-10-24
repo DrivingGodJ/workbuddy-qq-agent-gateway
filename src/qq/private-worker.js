@@ -427,14 +427,14 @@ export class PrivateWorker {
       // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
       const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
       const inputMessages = useMcpRead
-        ? work.messages.filter((message) => Number(message.sequence) > conversationReadSequence(conversation))
-        : work.messages;
+        ? work.messages.filter((message) => !message.readAt && Number(message.sequence) > conversationReadSequence(conversation))
+        : autoSubscriptionTurn ? work.messages.filter((message) => !message.readAt) : work.messages;
       let prompt = autoSubscriptionTurn
         ? buildAutoSubscriptionPrompt(inputContexts, {
             targetType: "private",
             targetId: userId,
             targetName: this.targetNameResolver(userId),
-            pendingMessages: work.messages,
+            pendingMessages: inputMessages,
             allowAutomations: codexOptions.calendarRemindersEnabled,
             includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt,
             sourceViaMcp,
@@ -532,9 +532,10 @@ export class PrivateWorker {
           this.onEvent({ type: "private-delta", userId, threadId, delta: autoSubscriptionTurn ? "" : delta, text: visibleText, at: new Date().toISOString() });
         }
       };
+      if (autoSubscriptionTurn && inputMessages.length) await this.store.markMessagesRead(userId, inputMessages);
       const autoTurn = await runConversationTurn({ codex: this.codex, request: turnRequest,
         autoSubscription: autoSubscriptionTurn ? { contexts: inputContexts, targetType: "private", targetId: userId,
-          pendingMessages: work.messages, allowAutomations: codexOptions.calendarRemindersEnabled,
+          pendingMessages: inputMessages, allowAutomations: codexOptions.calendarRemindersEnabled,
           sourceReadContext: sourceViaMcp ? qqToolContext : null } : null,
         onRecovery: () => this.onEvent({ type: "private-send-tool-recovery", userId, threadId, at: new Date().toISOString() })
       });
@@ -554,7 +555,8 @@ export class PrivateWorker {
           bootstrapComplete: !result.compacted, bootstrapRevision: THREAD_INSTRUCTIONS_REVISION,
           lastReadSequence: qqToolContext.lastReadSequence
         });
-        await this.mediaManager.removeMessages([...processed, ...removedSourceMessages]);
+        const sharedProcessed = await qqToolContext.completeSharedReads?.() || [];
+        await this.mediaManager.removeMessages([...processed, ...sharedProcessed, ...removedSourceMessages]);
         this.followup.publishWaiting(userId, { threadId, turnId: result.turnId });
         this.onEvent({ type: "private-turn-completed", userId, threadId, turnId: result.turnId, reply: live?.lastReply || "", at: new Date().toISOString() });
         return;

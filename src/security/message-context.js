@@ -7,7 +7,7 @@ export function compactMessageContext(messages, activeMessages = messages, image
   const senders = new Map();
   for (const message of messages) {
     const id = clean(message.senderId) || "未知";
-    senders.set(id, `${id}=${clean(message.senderName) || "群成员"}[${message.trust === "OWNER" ? "OWNER" : "UNTRUSTED"}]`);
+    senders.set(id, `${id}=${clean(message.senderName) || "群成员"}[${message.isSelf ? "SELF 已发送，仅供时间定位" : message.trust === "OWNER" ? "OWNER" : "UNTRUSTED"}]`);
   }
   const lines = senders.size ? [`发言者：${[...senders.values()].join("；")}`] : [];
   let day = null;

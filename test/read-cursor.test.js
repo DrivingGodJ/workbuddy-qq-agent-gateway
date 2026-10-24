@@ -97,7 +97,7 @@ test("each successful silent page advances the durable cursor and deletes only c
   }
 });
 
-test("failed and cancelled rounds replay fresh reads but not earlier successful retained pages", async (t) => {
+test("failed and cancelled rounds retain input but never repeat acknowledged reads, including after restart", async (t) => {
   for (const failure of ["model", "QQ send", "cancelled", "reader", "process restart"]) {
     const f = await fixture(t);
     await f.appendMany(45);
@@ -122,8 +122,10 @@ test("failed and cancelled rounds replay fresh reads but not earlier successful 
     await f.restart();
     const retry = await f.begin();
     assert.equal((await f.read(retry.context)).isError, false);
-    assert.deepEqual(retry.pages[0], Array.from({ length: 40 }, (_, index) => 46 + index), failure);
-    assert.equal(retry.context.lastReadSequence, 85, failure);
+    const first = failure === "reader" ? 46 : 86;
+    const count = failure === "reader" ? 40 : 5;
+    assert.deepEqual(retry.pages[0], Array.from({ length: count }, (_, index) => first + index), failure);
+    assert.equal(retry.context.lastReadSequence, failure === "reader" ? 85 : 90, failure);
   }
 });
 
@@ -140,14 +142,14 @@ test("normal completion consumes confirmed sends and later silent reads for next
   await f.read(context);
   assert.equal(context.lastReadSequence, 125);
   const processed = await f.complete(context);
-  assert.equal(processed.length, 80);
+  assert.equal(processed.length, 79, "the self receipt occupies one chronological page slot");
   assert.deepEqual(f.store.snapshot(f.targetId).pendingMessages.map((message) => message.sequence),
-    [126, 127, 128, 129, 130]);
+    [126, 127, 128, 129, 130, 131]);
   assert.equal(f.store.snapshot(f.targetId).deferredThroughSequence, 125);
   await f.restart();
   const next = await f.begin();
   await f.read(next.context);
-  assert.deepEqual(next.pages[0], [126, 127, 128, 129, 130]);
+  assert.deepEqual(next.pages[0], [126, 127, 128, 129, 130, 131]);
   assert.deepEqual(f.sent, ["confirmed reply"]);
 });
 
@@ -170,7 +172,7 @@ test("same-thread resume preserves read and periodic cursors while replacing the
   assert.equal(context.lastReadSequence, 46);
 });
 
-test("standalone scheduled tasks can read pending without borrowing or changing the chat cursor", async (t) => {
+test("standalone scheduled reads acknowledge input without consuming pending or borrowing the processing cursor", async (t) => {
   const f = await fixture(t);
   await f.appendMany(45);
   await f.silentlyReadThrough(45);
@@ -183,13 +185,14 @@ test("standalone scheduled tasks can read pending without borrowing or changing 
   assert.equal((await context.liveTool("send_message", { text: "scheduled message" }, f.active)).isError, false);
   assert.equal((await context.liveTool("end_conversation", {}, f.active)).isError, false);
   const after = f.store.snapshot(f.targetId);
-  assert.deepEqual(after.pendingMessages, before.pendingMessages);
+  assert.equal(after.pendingMessages.length, before.pendingMessages.length);
+  assert.ok(after.pendingMessages[0].readAt);
   assert.equal(after.deferredThroughSequence, before.deferredThroughSequence);
   assert.equal(after.periodicCheckedThroughSequence, before.periodicCheckedThroughSequence);
   assert.equal(after.liveSession, null);
   const ordinary = await f.begin();
   await f.read(ordinary.context);
-  assert.deepEqual(ordinary.pages[0], [46]);
+  assert.deepEqual(ordinary.pages[0], [47], "only the unread scheduled self receipt remains to be read");
 });
 
 test("a fresh image boundary remains unread across a completed page and is delivered next visual round", async (t) => {
