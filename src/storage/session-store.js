@@ -628,9 +628,18 @@ export class SessionStore {
   async applyStickerLabelResults(groupId, labels = [], { discardedIds = [] } = {}) {
     const group = this.ensureGroup(groupId);
     const labelById = new Map((labels || []).map((label) => [String(label?.id || ""), String(label?.usage || "")]));
+    const outcomes = new Map((labels || []).map((label) => [String(label?.id || ""), label?.labelStatus]));
     const discarded = new Set((discardedIds || []).map(String));
     for (const message of group.pendingMessages) {
       for (const image of message.images || []) {
+        const outcome = outcomes.get(String(image.stickerId || ""));
+        if (outcome === "excluded" || outcome === "capacity_skipped") {
+          image.stickerExcluded = outcome === "excluded";
+          image.stickerLabel = outcome === "excluded" ? `已拉黑：${labelById.get(image.stickerId) || "无使用价值"}` : "表情库容量已满，未入库";
+          image.stickerNeedsReview = false;
+          image.stickerCandidate = false;
+          continue;
+        }
         if (discarded.has(String(image.stickerId || ""))) {
           image.stickerLabel = "识别失败，未收录";
           image.stickerNeedsReview = false;

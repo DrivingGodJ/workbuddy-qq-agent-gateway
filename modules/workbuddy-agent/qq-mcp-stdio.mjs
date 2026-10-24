@@ -168,7 +168,7 @@ const allTools = [
   },
   {
     name: "send_reaction",
-    description: "立即发送一个内置表情或收藏原生表情包；这些场景可优先只发表情、不补文字，本轮仍可继续聊天。",
+    description: "立即发送一个内置表情或收藏原生表情包。闲聊的简短反应优先考虑本工具；合适就单发表情，不必先发文字或补解释，没有合适表情再用文字等其他动作，不强凑或刷屏。",
     inputSchema: {
       type: "object", properties: {
         face: { type: "string", minLength: 1, description: "list_reactions 给出的内置表情名称" },

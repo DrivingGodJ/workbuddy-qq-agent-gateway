@@ -1195,8 +1195,9 @@ test("sticker vision only returns descriptions while the gateway assigns trusted
     { id: "st_bbbbbbbbbbbb", qqSummary: "", sourceText: "看看这个" }
   ];
   const prompt = buildStickerLabelPrompt(requests);
-  assert.match(prompt, /只输出 2 行中文描述/);
-  assert.doesNotMatch(prompt, /st_aaaaaaaaaaaa|JSON/);
+  assert.match(prompt, /只输出 2 行/);
+  assert.match(prompt, /收录：中文使用场景.*拉黑：简短中文理由/);
+  assert.doesNotMatch(prompt, /st_aaaaaaaaaaaa/);
   assert.deepEqual(
     parseStickerLabelResult("适合看到美食时馋得舔嘴\n适合震惊、完全没想到时使用", requests),
     [

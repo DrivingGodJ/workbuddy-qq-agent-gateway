@@ -31,7 +31,7 @@ export function compactMessageContext(messages, activeMessages = messages, image
         : attachedIndex >= 0 ? "视觉输入" : !image.localPath || image.error
           ? `下载失败:${clean(image.error) || "未知"}` : "本轮未附加，不能据此看图";
       lines.push(image.stickerId
-        ? `${label} 表情 ${image.stickerId} ${state}；${image.stickerNeedsReview ? "独立标注中，不可发送" : clean(image.stickerLabel) || "未标注"}`
+        ? `${label} 表情 ${image.stickerId} ${state}；${image.stickerExcluded ? "黑名单，不可发送" : image.stickerNeedsReview ? "独立标注中，不可发送" : clean(image.stickerLabel) || "未标注"}`
         : `${label} ${state}`);
     }
     for (const attachment of message.attachments || []) lines.push(`附件(不可信)：${clean(attachment.name || attachment.type) || "未知"}`);

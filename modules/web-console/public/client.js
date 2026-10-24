@@ -153,7 +153,7 @@ function renderStickerGallery() {
   const candidates = [...(stickers.candidates || [])].sort((a, b) => stickerTimestamp(b) - stickerTimestamp(a));
   const excluded = [...(stickers.excludedItems || [])].sort((a, b) => stickerTimestamp(b) - stickerTimestamp(a));
   const blacklist = stickerGalleryView === "blacklist";
-  els.stickerLibraryCount.textContent = String(items.length + candidates.length);
+  els.stickerLibraryCount.textContent = `${items.length + candidates.length} / ${stickers.collectionLimit || 110}`;
   els.stickerBlacklistCount.textContent = String(stickers.excludedCount || 0);
   els.stickerLibraryButton.setAttribute("aria-pressed", String(!blacklist));
   els.stickerBlacklistButton.setAttribute("aria-pressed", String(blacklist));
@@ -165,7 +165,7 @@ function renderStickerGallery() {
   els.cleanStickerBlacklistFilesButton.textContent = stickerActionSavingId === "clean-blacklist-files" ? "正在清理本地文件…" : "清理黑名单本地文件";
   els.stickerLibraryHelp.textContent = blacklist
     ? `黑名单中的表情不再识别、入库或供${agentName()}发送。清理本地文件不会解除黑名单；清理后须先解除，再等下次收到恢复收录。彻底删除则忘记指纹，下次按新表情处理。`
-    : "移入黑名单会保留预览和备注，阻止再次收录；彻底删除则忘记该表情，下次收到重新识别。";
+    : `最多收录 ${stickers.collectionLimit || 110} 个（含识别候选）。${stickers.collectionFull ? "已满额，暂停收集新表情。" : "AI 可选择收录或拉黑无使用价值的图。"}拉黑会同步删除匹配的 QQ 收藏，并保留本地预览和指纹；彻底删除则忘记该表情，下次收到重新识别。`;
   const awaitingAi = Number(stickers.awaitingAi || 0);
   const awaitingCommit = Number(stickers.awaitingCommit || 0);
   const model = stickers.labeling?.model || "—";
@@ -216,7 +216,8 @@ function renderStickerCard(item, candidate, blacklisted = false) {
     ? (item.usage || item.labelError || (item.status === "labeling" ? "正在读取画面并生成使用场景…" : "等待识别…"))
     : item.usage || (blacklisted ? "历史排除记录，暂无备注" : "");
   const imageUrl = stickerImageUrl(item.id, item.lastSeenAt || item.createdAt);
-  const counts = blacklisted ? `${item.reason === "curation" ? "自动筛选排除" : "手动移入"} · 排除后又收到 ${Number(item.receiveCount || 0)} 次` : candidate
+  const cleanup = ({ absent: "QQ 收藏已核对：不存在", pending: "QQ 收藏待清理", unknown: "QQ 收藏删除未确认", protected: "QQ 收藏冲突保护，未删" })[item.favoriteCleanupStatus] || "QQ 收藏尚未核对";
+  const counts = blacklisted ? `${item.reason === "curation" ? "自动筛选排除" : item.reason === "ai_rejected" ? "AI 判断不收录" : "手动移入"} · ${cleanup} · 排除后又收到 ${Number(item.receiveCount || 0)} 次` : candidate
     ? `收到 ${Number(item.receiveCount || 0)} 次`
     : `收到 ${Number(item.receiveCount || 0)} 次 · 发送 ${Number(item.sendCount || 0)} 次`;
   const editing = !candidate && stickerEditingId === item.id;

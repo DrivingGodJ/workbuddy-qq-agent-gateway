@@ -255,7 +255,10 @@ export class OneBotClient {
     const result = await this.request("/fetch_custom_face_detail", {
       count: Math.max(0, Math.floor(Number(count) || 0))
     });
-    return Array.isArray(result.data) ? result.data : [];
+    if (result.body?.status !== "ok" || Number(result.body?.retcode) !== 0 || result.body?.retcode == null || !Array.isArray(result.data)) {
+      throw new Error("QQ 收藏列表未返回明确成功与有效数据，不能据此确认已删除");
+    }
+    return result.data;
   }
 
   async addCustomFace(file) {

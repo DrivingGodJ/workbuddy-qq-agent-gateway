@@ -553,6 +553,12 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, { result, stickers: stickerManager.publicState() });
     return;
   }
+  if (req.method === "POST" && url.pathname === "/api/qq/stickers/blacklist/clean-qq-favorites") {
+    const result = await stickerManager.cleanupExcludedFavorites();
+    recordEvent({ type: "sticker-blacklist-qq-cleaned", ...result, at: new Date().toISOString() });
+    sendJson(res, 200, { result, stickers: stickerManager.publicState() });
+    return;
+  }
   const stickerAction = url.pathname.match(/^\/api\/qq\/stickers\/(st_[a-f0-9]{12,64})\/(update|delete|blacklist|restore|forget)$/i);
   if (req.method === "POST" && stickerAction) {
     const [, id, requestedAction] = stickerAction;

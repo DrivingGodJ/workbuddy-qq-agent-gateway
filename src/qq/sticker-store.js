@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { isUsableStickerDescription } from "./sticker-label.js";
+import { selectBlacklistedFavorites } from "./blacklisted-favorites.js";
+
+export const STICKER_COLLECTION_LIMIT = 110;
 
 export class QqStickerStore {
   constructor({ filePath, libraryDir, oneBot, fileManager, maxPromptItems = 24, clock = () => new Date() } = {}) {
@@ -41,6 +44,14 @@ export class QqStickerStore {
       for (const image of message?.images || []) {
         if (!image?.isSticker || !image.localPath || image.context === "quoted") continue;
         const entry = await this.collectOne(image, message, contextMessages);
+        if (!entry) {
+          delete image.stickerId;
+          image.stickerNeedsReview = false;
+          image.stickerCandidate = false;
+          image.stickerCollectionSkipped = "capacity";
+          image.stickerLabel = `表情库已达 ${STICKER_COLLECTION_LIMIT} 个，未收录；原消息图片保留`;
+          continue;
+        }
         image.stickerId = entry.id;
         image.stickerExcluded = entry.labelStatus === "excluded";
         image.stickerLabel = image.stickerExcluded ? "已排除，不再收录" : entry.usage || "待 AI 看图标注";
@@ -100,6 +111,10 @@ export class QqStickerStore {
       duplicate.lastSource = sourceInfo(message);
       return duplicate;
     }
+
+    // Candidates reserve slots before vision runs, so concurrent intake cannot
+    // oversubscribe the admitted library. Full is not a blacklist decision.
+    if (Object.keys(this.state.stickers).length + Object.keys(this.state.candidates).length >= STICKER_COLLECTION_LIMIT) return null;
 
     const id = uniqueStickerId({ ...this.state.stickers, ...this.state.candidates, ...this.state.excluded }, sha256);
     const extension = safeExtension(image.localPath, image.mimeType);
@@ -228,6 +243,14 @@ export class QqStickerStore {
       for (const candidate of labels) {
         const id = String(candidate?.id || "");
         const usage = normalizeUsage(candidate?.usage);
+        if (candidate?.decision === "blacklist" && isUsableStickerDescription(usage)) {
+          const pending = this.state.candidates[id];
+          if (!pending) continue;
+          await this.excludeEntries([{ ...pending, usage }], "ai_rejected");
+          updated.push({ id, usage, labelStatus: "excluded", decision: "blacklist" });
+          changed = true;
+          continue;
+        }
         if (!isUsableStickerDescription(usage)) {
           const pending = this.state.candidates[id];
           if (pending) {
@@ -241,6 +264,13 @@ export class QqStickerStore {
         if (!entry) {
           const pending = this.state.candidates[id];
           if (!pending) continue;
+          if (Object.keys(this.state.stickers).length >= STICKER_COLLECTION_LIMIT) {
+            await this.removeManagedFile(pending.localPath, { pendingOnly: true });
+            delete this.state.candidates[id];
+            updated.push({ id, usage: "收录容量已满，未入库", labelStatus: "capacity_skipped" });
+            changed = true;
+            continue;
+          }
           const extension = safeExtension(pending.localPath, pending.mimeType);
           const admittedPath = join(this.libraryDir, `${id}${extension}`);
           if (resolve(pending.localPath) !== resolve(admittedPath)) {
@@ -309,6 +339,7 @@ export class QqStickerStore {
           continue;
         }
         candidate.usage = usage;
+        candidate.labelDecision = label?.decision === "blacklist" ? "blacklist" : "keep";
         candidate.labelStatus = "ready_to_commit";
         candidate.labelSource = "agent-vision";
         candidate.labelError = null;
@@ -324,7 +355,8 @@ export class QqStickerStore {
     const wanted = new Set((ids || []).map(String));
     const labels = Object.values(this.state.candidates)
       .filter((candidate) => wanted.has(candidate.id) && candidate.labelStatus === "ready_to_commit" && normalizeUsage(candidate.usage))
-      .map((candidate) => ({ id: candidate.id, usage: candidate.usage }));
+      .map((candidate) => ({ id: candidate.id, usage: candidate.usage,
+        ...(candidate.labelDecision === "blacklist" ? { decision: "blacklist" } : {}) }));
     return this.applyLabels(labels);
   }
 
@@ -334,7 +366,8 @@ export class QqStickerStore {
     )));
     return Object.values(this.state.candidates)
       .filter((candidate) => ids.has(candidate.id) && candidate.labelStatus === "ready_to_commit" && normalizeUsage(candidate.usage))
-      .map((candidate) => ({ id: candidate.id, usage: candidate.usage }));
+      .map((candidate) => ({ id: candidate.id, usage: candidate.usage,
+        ...(candidate.labelDecision === "blacklist" ? { decision: "blacklist" } : {}) }));
   }
 
   async syncFavoriteDescription(entry) {
@@ -424,11 +457,47 @@ export class QqStickerStore {
     for (const entry of entries) excluded[entry.id] = exclusionRecord(entry, reason, this.nowIso());
     this.state = { ...previous,
       stickers: Object.fromEntries(Object.entries(previous.stickers).filter(([id]) => !removedIds.has(id))),
+      candidates: Object.fromEntries(Object.entries(previous.candidates).filter(([id]) => !removedIds.has(id))),
       excluded
     };
     try { await this.save(); }
     catch (error) { this.state = previous; throw error; }
+    await this.flushExcludedFavorites([...removedIds]).catch((error) => console.warn(`QQ blacklist favorite cleanup deferred: ${error.message}`));
     await this.flushPrunedFiles().catch((error) => console.warn(`Excluded file cleanup will resume on recovery: ${error.message}`));
+  }
+
+  cleanupExcludedFavorites() { return this.enqueue(() => this.flushExcludedFavorites()); }
+
+  async flushExcludedFavorites(ids = null) {
+    const wanted = new Set(ids || Object.keys(this.state.excluded));
+    const excluded = Object.fromEntries(Object.entries(this.state.excluded).filter(([id]) => wanted.has(id)));
+    if (!this.oneBot?.fetchCustomFaceDetails || !this.oneBot?.deleteCustomFace) return { supported: false, deleted: 0, remaining: null };
+    const select = (faces) => selectBlacklistedFavorites({ ...this.state, excluded }, faces);
+    let targets, remaining, afterFaces, failure = null, attempted = 0;
+    try {
+      targets = select(await this.refreshFavoriteDetails(true));
+      for (const target of targets) {
+        try { await this.oneBot.deleteCustomFace(target.emojiId); attempted++; }
+        catch (error) { failure = String(error.message || error).slice(0, 300); break; }
+      }
+      afterFaces = await this.refreshFavoriteDetails(true);
+      remaining = select(afterFaces);
+    } catch (error) { failure = String(error.message || error).slice(0, 300); }
+    for (const entry of Object.values(excluded)) {
+      const digests = new Set([...(entry.md5s || []), entry.archivedSticker?.md5].filter(Boolean).map((value) => value.toLowerCase()));
+      const stillPresent = remaining?.some((target) => digests.has(target.md5));
+      const protectedPresent = !stillPresent && afterFaces?.some((face) => digests.has(normalizeMd5(face.md5)));
+      entry.favoriteCleanupStatus = remaining ? stillPresent ? "pending" : protectedPresent ? "protected" : "absent" : "unknown";
+      entry.favoriteCleanupError = protectedPresent ? "与可用表情、候选或歧义标识冲突，未删除" : stillPresent || !remaining ? failure : null;
+      entry.favoriteCleanupCheckedAt = this.nowIso();
+    }
+    await this.save();
+    const remainingIds = new Set((remaining || []).map((target) => target.emojiId));
+    return { supported: true, matched: targets?.length || 0,
+      deleted: remaining ? (targets || []).filter((target) => !remainingIds.has(target.emojiId)).length : 0,
+      remaining: remaining?.length ?? null,
+      protected: Object.values(excluded).filter((entry) => entry.favoriteCleanupStatus === "protected").length,
+      attempted, error: failure };
   }
 
   cleanupPrunedFiles() { return this.enqueue(() => this.flushPrunedFiles()); }
@@ -528,6 +597,7 @@ export class QqStickerStore {
     return this.enqueue(async () => {
       const entry = this.state.excluded[String(id || "").trim()];
       if (!entry) return null;
+      if (Object.keys(this.state.stickers).length + Object.keys(this.state.candidates).length >= STICKER_COLLECTION_LIMIT) throw new Error(`表情库已达 ${STICKER_COLLECTION_LIMIT} 个，请先移除一个表情再恢复。`);
       if (this.state.stickers[entry.id] || this.state.candidates[entry.id]) throw new Error("表情记录发生冲突，未覆盖现有表情");
       const archive = entry.archivedSticker;
       let canRestore = archive?.labelStatus === "ready" && isUsableStickerDescription(archive.usage);
@@ -596,6 +666,8 @@ export class QqStickerStore {
     const candidates = Object.values(this.state.candidates);
     return {
       total: entries.length,
+      collectionLimit: STICKER_COLLECTION_LIMIT,
+      collectionFull: entries.length + candidates.length >= STICKER_COLLECTION_LIMIT,
       ready: entries.filter((entry) => entry.labelStatus === "ready").length,
       awaitingAi: candidates.filter((entry) => entry.labelStatus !== "ready_to_commit").length,
       awaitingCommit: candidates.filter((entry) => entry.labelStatus === "ready_to_commit").length,
@@ -608,6 +680,8 @@ export class QqStickerStore {
         lastSeenAt: entry.lastSeenAt, receiveCount: entry.receiveCount,
         usage: entry.usage || entry.archivedSticker?.usage || "",
         filesCleanedAt: entry.filesCleanedAt || null,
+        favoriteCleanupStatus: entry.favoriteCleanupStatus || "unchecked",
+        favoriteCleanupError: entry.favoriteCleanupError || null,
         hasPreview: Boolean(entry.archivedSticker?.localPath),
         canRestore: Boolean(entry.archivedSticker?.localPath && entry.archivedSticker.labelStatus === "ready"
           && isUsableStickerDescription(entry.archivedSticker.usage))
@@ -791,13 +865,16 @@ function normalizeState(value) {
   }
   const excluded = {};
   for (const [id, raw] of Object.entries(value.excluded || {})) {
-    if (!/^st_[a-f0-9]{12,64}$/i.test(id) || !raw || !["manual", "curation"].includes(raw.reason)) continue;
+    if (!/^st_[a-f0-9]{12,64}$/i.test(id) || !raw || !["manual", "curation", "ai_rejected"].includes(raw.reason)) continue;
     const entry = {
       id,
       sha256s: validDigests(raw.sha256s, 64),
       md5s: validDigests(raw.md5s, 32),
       marketEmojiIds: validDigests(raw.marketEmojiIds, 32),
       reason: raw.reason,
+      favoriteCleanupStatus: ["absent", "pending", "unknown", "protected"].includes(raw.favoriteCleanupStatus) ? raw.favoriteCleanupStatus : "unchecked",
+      favoriteCleanupError: raw.favoriteCleanupError ? String(raw.favoriteCleanupError).slice(0, 300) : null,
+      favoriteCleanupCheckedAt: raw.favoriteCleanupCheckedAt || null,
       excludedAt: raw.excludedAt || null,
       lastSeenAt: raw.lastSeenAt || null,
       receiveCount: Math.max(0, Number(raw.receiveCount) || 0),
@@ -852,6 +929,7 @@ function normalizeEntry(id, raw) {
       marketKey: String(raw.marketKey || ""),
       qqSummary: cleanLabel(raw.qqSummary),
       usage: normalizeUsage(raw.usage),
+      labelDecision: raw.labelDecision === "blacklist" ? "blacklist" : "keep",
       labelStatus: raw.labelStatus === "ready" ? "ready" : "needs_review",
       labelSource: String(raw.labelSource || "legacy"),
       labelError: raw.labelError ? String(raw.labelError).slice(0, 500) : null,
