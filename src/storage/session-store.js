@@ -272,7 +272,8 @@ export class SessionStore {
     const followup = group.replyFollowup;
     if (followup && Date.parse(stored.receivedAt) >= Date.parse(followup.expiresAt)) group.replyFollowup = null;
     else if (followup && Number(stored.sequence) > followup.afterSequence
-      && Date.parse(stored.receivedAt) >= Date.parse(followup.startedAt) && stored.eventType !== "poke") {
+      && Date.parse(stored.receivedAt) >= Date.parse(followup.startedAt)
+      && !(stored.eventType === "poke" && stored.mentionedBot)) {
       // Consume the window and queue the new round in the same durable write as
       // the message. A burst queues one round; later messages join that batch.
       group.replyFollowup = null;
@@ -302,7 +303,7 @@ export class SessionStore {
     // Program-controlled completion also catches messages received while the
     // model was finishing, even when they did not @ the bot.
     const unread = afterSequence == null ? null : group.pendingMessages.find((message) =>
-      Number(message.sequence) > Number(afterSequence) && message.eventType !== "poke");
+      Number(message.sequence) > Number(afterSequence) && !(message.eventType === "poke" && message.mentionedBot));
     if (unread) {
       group.replyFollowup = null;
       group.pendingTrigger = strongerTrigger(group.pendingTrigger, makeTrigger("followup", unread, now.toISOString()));

@@ -1,6 +1,7 @@
 import { unreadConversationMessages } from "../groups/group-state.js";
 import { compactMessageContext } from "../security/message-context.js";
 import { sanitizeGroupReply } from "../security/policy.js";
+import { isPokeEvent } from "../security/reply-reference.js";
 
 const QQ_ID = /^[0-9]{5,14}$/u;
 const ARGUMENTS = new Set(["target_type", "target_id", "offset", "limit"]);
@@ -101,7 +102,7 @@ export function createSharedContextReader({
         total: unread.length, nextOffset })
     ].filter(Boolean).join("\n\n");
     const selected = selectedChannels.get(namespace) || { groupId, ids: new Set() };
-    for (const message of messages) selected.ids.add(String(message.messageId));
+    for (const message of messages) if (!isPokeEvent(message)) selected.ids.add(String(message.messageId));
     await channel.store.markMessagesRead?.(channel.id, messages);
     try { onEvent({ type: "messages-read", targetType: channel.type, targetId: channel.id, at: new Date().toISOString() }); } catch { /* acknowledgement is already durable */ }
     selectedChannels.set(namespace, selected);

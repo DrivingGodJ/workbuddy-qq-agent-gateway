@@ -7,6 +7,7 @@ import { QqMessageReader, MESSAGE_READER_TOOLS } from "./message-reader.js";
 import { readGroupManagement, manageGroup } from "./group-management.js";
 import { conversationReadSequence, unreadConversationMessages } from "../groups/group-state.js";
 import { homeAssistantRequest } from "../automation/home-assistant.js";
+import { isPokeEvent } from "../security/reply-reference.js";
 
 const PAGE_SIZE = 40;
 const MAX_WAIT_MS = 8000;
@@ -24,7 +25,7 @@ export function currentOwnerManagementMessage(messageReader, groupId, ownerId, i
     .filter((message) => String(message.groupId) === String(groupId)
       && String(message.senderId) === String(ownerId) && message.trust === "OWNER"
       && message.source === "qq" && Number.isInteger(Number(message.sequence))
-      && Number(message.sequence) > 0 && !isRecalled(message.messageId))
+      && Number(message.sequence) > 0 && !isPokeEvent(message) && !isRecalled(message.messageId))
     .sort((a, b) => Number(a.sequence) - Number(b.sequence)).at(-1) || null;
 }
 
@@ -35,7 +36,7 @@ function currentOwnerQzoneMessages(store, messageReader, targetId) {
     pending.has(String(message.messageId)) && String(message.groupId) === String(targetId)
       && String(message.senderId) === OWNER_QQ_ID && message.trust === "OWNER"
       && message.source === "qq" && Number.isInteger(Number(message.sequence))
-      && Number(message.sequence) > 0 && !store.isRecalled?.(targetId, message.messageId))
+      && Number(message.sequence) > 0 && !isPokeEvent(message) && !store.isRecalled?.(targetId, message.messageId))
     .map((message) => ({ ...message, currentOwnerMessage: true }));
 }
 
@@ -78,7 +79,7 @@ export function createLiveConversationTools({
     canReplyToMessage: (messageId) => {
       const message = messageReader.messages.get(String(messageId));
       return Boolean(message && String(message.groupId) === String(targetId)
-        && !store.isRecalled?.(targetId, messageId));
+        && !isPokeEvent(message) && !store.isRecalled?.(targetId, messageId));
     },
     requireRead: !scheduledTask,
     scheduledTask,
@@ -389,6 +390,10 @@ export function createLiveConversationTools({
       }
     }
     if (name === "post_qzone") refreshQzonePermissions();
+    if ((name === "list_reactions" || name === "send_reaction") && stickerManager?.promptCatalog) {
+      // Validate remembered IDs against the whole live library, not the short prompt snapshot.
+      context.stickers = stickerManager.promptCatalog({ all: true });
+    }
     const queued = [];
     const validated = handleQqMcpTool({ name, args, context, queued });
     if (validated.isError || !queued.length) return validated;

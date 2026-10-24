@@ -1019,7 +1019,7 @@ async function handleGroupPoke(payload) {
   const senderId = String(payload.user_id || "");
   const targetId = String(payload.target_id || "");
   if (!senderId || senderId === selfId) return { status: "ignored", reason: "Self poke" };
-  if (!targetId || targetId !== selfId) return { status: "ignored", reason: "Poke target is not the Agent" };
+  if (!/^\d{5,14}$/u.test(senderId) || !/^\d{5,14}$/u.test(targetId)) return { status: "ignored", reason: "Invalid poke participant" };
 
   const message = normalizeOneBotGroupPoke({ ...payload, self_id: selfId });
   if (rememberMessage(`group:${message.messageId}`)) return { status: "ok", duplicate: true };
@@ -1034,6 +1034,7 @@ async function handleGroupPoke(payload) {
   }
   if (!allowedGroups.includes(groupId) || removingTargets.has(`group:${groupId}`)) return {status:"ignored",reason:"Conversation was removed"};
   const stored = await store.appendMessage(message);
+  if (!stored) return { status: "ignored", reason: "Poke event was removed" };
   recordEvent({ type: "poke", groupId, message: stored, at: new Date().toISOString() });
   await triggerManager.considerMessage(stored);
   if (!allowedGroups.includes(groupId) || removingTargets.has(`group:${groupId}`)) return {status:"ignored",reason:"Conversation was removed"};
@@ -1043,7 +1044,7 @@ async function handleGroupPoke(payload) {
     groupId,
     messageId: stored.messageId,
     pendingMessages: group.pendingMessages.length,
-    trigger: group.pendingTrigger?.reason || "poke"
+    trigger: group.pendingTrigger?.reason || null
   };
 }
 

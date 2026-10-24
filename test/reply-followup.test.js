@@ -395,7 +395,9 @@ test("waiting is target-scoped and listeners are cleaned on timeout, cancel and 
   const f = await fixture(t);
   let woke = false;
   const waiting = f.store.waitForNewMessages("12345", { afterSequence: 1, timeoutMs: 35 }).then(() => { woke = true; });
-  await f.append("other group", { groupId: "54321" });
+  // Emit synchronously: slow CI disk I/O must not exhaust the 35 ms timeout
+  // before this assertion, which checks channel isolation rather than speed.
+  f.store.messageEvents.emit("54321");
   assert.equal(woke, false);
   await waiting;
   assert.equal(f.store.messageEvents.listenerCount("12345"), 0);
@@ -437,7 +439,8 @@ test("an image arriving during active wait queues a fresh visual round when the 
 });
 
 async function eventually(predicate) {
-  for (let attempt = 0; attempt < 80; attempt++) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await pause(5);
   }

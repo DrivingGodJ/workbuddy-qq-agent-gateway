@@ -1,6 +1,9 @@
 /** Render QQ reply relationships without treating quoted text as a new instruction. */
+export function isPokeEvent(message) { return message?.eventType === "poke" || String(message?.messageId || "").startsWith("poke:"); }
+
 export function messageLabel(message, clean) {
   const id = message?.messageId == null ? "" : clean(message.messageId);
+  if (isPokeEvent(message)) return ` [戳一戳事件 ${id}；不可引用回复或设精华]`;
   return id ? ` [消息 ID ${id}]` : "";
 }
 

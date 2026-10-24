@@ -41,7 +41,7 @@ export function homeAssistantRequest({ store, messageReader, targetId, targetTyp
   const isGroupMember = permission === "group" && targetType === "group" && message?.source === "qq"
     && /^[1-9][0-9]{4,13}$/u.test(String(message.senderId || ""));
   const ageMs = Date.now() - Date.parse(message?.receivedAt || "");
-  if (scheduledTask || !["owner", "group"].includes(permission) || permission === "group" && targetType !== "group" || !message || !(isOwner || isGroupMember)
+  if (scheduledTask || !["owner", "group"].includes(permission) || permission === "group" && targetType !== "group" || !message || message.eventType === "poke" || !(isOwner || isGroupMember)
     || String(message.groupId) !== String(targetId)
     || !["qq", "codex-ui"].includes(message.source) || !(Number(message.sequence) > 0)
     || !Number.isFinite(ageMs) || ageMs < -30_000 || ageMs > 15 * 60_000

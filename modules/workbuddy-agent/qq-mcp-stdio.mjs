@@ -168,11 +168,11 @@ const allTools = [
   },
   {
     name: "send_reaction",
-    description: "立即发送一个内置表情或收藏原生表情包。闲聊的简短反应优先考虑本工具；合适就单发表情，不必先发文字或补解释，没有合适表情再用文字等其他动作，不强凑或刷屏。",
+    description: "立即发送内置表情或收藏表情包。记得网关曾提供的真实名称或 ID 可直接发送，不必每次 list_reactions；网关会核对整个当前可用库。未知或失效且明确未发送时再查找，不能猜 ID；发送结果不明不重试。闲聊反应优先考虑合适表情，可单发，不强凑文字或刷屏。",
     inputSchema: {
       type: "object", properties: {
-        face: { type: "string", minLength: 1, description: "list_reactions 给出的内置表情名称" },
-        sticker_id: { type: "string", pattern: "^st_[a-f0-9]{12,64}$", description: "list_reactions 给出的收藏表情包 ID" }
+        face: { type: "string", minLength: 1, description: "网关曾提供且记得的真实内置表情名称，不确定才查找" },
+        sticker_id: { type: "string", pattern: "^st_[a-f0-9]{12,64}$", description: "网关曾提供且记得的真实收藏表情 ID，不要求本轮先查找" }
       }, oneOf: [{ required: ["face"] }, { required: ["sticker_id"] }], additionalProperties: false
     }
   },

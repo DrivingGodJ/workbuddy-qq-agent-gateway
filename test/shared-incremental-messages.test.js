@@ -221,6 +221,18 @@ test("private origins can explicitly send to the associated group, not an arbitr
   assert.deepEqual(f.sends.map((item) => item.slice(0, 3)), [["group", GROUP, "group reply"]]);
 });
 
+test("associated-group poke events are readable but cannot be quoted through linked-channel sending", async (t) => {
+  const f = await fixture(t, "private", A);
+  await f.append("group", GROUP, "901", "member poked another member", { eventType: "poke", pokeTargetId: B });
+  await f.call("read_messages");
+  const event = text(await f.call("read_context_messages", { target_type: "group", target_id: GROUP }));
+  assert.match(event, /member poked another member/);
+  const blocked = await f.call("send_context_message", { target_type: "group", target_id: GROUP,
+    text: "cannot quote event", reply_to_message_id: "901" });
+  assert.equal(blocked.isError, true);
+  assert.equal(f.sends.length, 0);
+});
+
 test("disabled destinations, cancelled turns, revoked links, and foreign reply IDs fail before transport", async (t) => {
   for (const scenario of ["disabled", "cancelled", "unlinked", "foreign reply", "recalled"]) {
     const f = await fixture(t);

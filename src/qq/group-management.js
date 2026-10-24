@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { getAgentName } from "../security/policy.js";
+import { isPokeEvent } from "../security/reply-reference.js";
 
 const MEMBER_ID = /^\d{5,14}$/u;
 const MESSAGE_ID = /^-?\d+$/u;
@@ -48,7 +49,7 @@ function hasCurrentOwnerContext(ownerMessage, groupId, ownerId) {
   return Boolean(ownerId && ownerMessage && String(ownerMessage.groupId) === String(groupId)
     && String(ownerMessage.senderId) === String(ownerId) && ownerMessage.trust === "OWNER"
     && ownerMessage.source === "qq" && Number.isInteger(Number(ownerMessage.sequence))
-    && Number(ownerMessage.sequence) > 0);
+    && Number(ownerMessage.sequence) > 0 && !isPokeEvent(ownerMessage));
 }
 
 async function checkedRequest(oneBot, path, body) {
@@ -120,7 +121,8 @@ async function ordinaryTarget(oneBot, groupId, value, { botId, ownerId, allowSel
   return userId;
 }
 
-async function checkedGroupMessage(oneBot, groupId, value) {
+async function checkedGroupMessage(oneBot, groupId, value, messageReader) {
+  if (String(value || "").startsWith("poke:") || isPokeEvent(messageReader?.messages?.get(String(value)))) deny("戳一戳是互动事件，不能设为或移除精华消息。");
   const messageId = requireMessageId(value);
   const message = await oneBot.getMessage(messageId);
   if (String(message?.group_id || "") !== String(groupId)) deny("消息不属于当前群，不能操作。");
@@ -243,7 +245,7 @@ export async function manageGroup({ oneBot, groupId, botId, ownerId, ownerMessag
     body.notice_id = id;
     summary = `已删除群公告 ${id}`;
   } else if (["pin_message", "unpin_message"].includes(action)) {
-    const messageId = await checkedGroupMessage(oneBot, groupId, args.message_id);
+    const messageId = await checkedGroupMessage(oneBot, groupId, args.message_id, messageReader);
     path = action === "pin_message" ? "/set_essence_msg" : "/delete_essence_msg";
     delete body.group_id;
     body.message_id = Number(messageId);

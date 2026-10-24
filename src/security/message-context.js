@@ -1,5 +1,5 @@
 import { messageResourceHints } from "../qq/resource-hints.js";
-import { replyReference } from "./reply-reference.js";
+import { replyReference, isPokeEvent } from "./reply-reference.js";
 
 /** Same pending facts, compact envelope. No independent history or permission inference. */
 export function compactMessageContext(messages, activeMessages = messages, imagePaths = null) {
@@ -18,6 +18,7 @@ export function compactMessageContext(messages, activeMessages = messages, image
     if (match && day !== match[1]) { day = match[1]; lines.push(`日期：${day}`); }
     const id = clean(message.messageId);
     lines.push(`[${match?.[2] || time}] ${clean(message.senderId) || "未知"} #${id || "无ID"}: ${clean(message.text) || "（无文字）"}`);
+    if (isPokeEvent(message)) lines.push("戳一戳事件：仅供理解互动，不可引用回复或设精华。");
     lines.push(...messageResourceHints(message));
     const reference = replyReference(message, activeMessages, clean);
     if (reference) lines.push(reference);

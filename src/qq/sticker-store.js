@@ -393,7 +393,7 @@ export class QqStickerStore {
     });
   }
 
-  promptCatalog() {
+  promptCatalog({ all = false } = {}) {
     return Object.values(this.state.stickers)
       .filter((entry) => entry.localPath && entry.usage && entry.labelStatus === "ready")
       .sort((a, b) => {
@@ -401,7 +401,7 @@ export class QqStickerStore {
         const bTime = Date.parse(b.lastUsedAt || b.lastSeenAt || b.createdAt || 0) || 0;
         return bTime - aTime;
       })
-      .slice(0, this.maxPromptItems)
+      .slice(0, all ? undefined : this.maxPromptItems)
       .map((entry) => ({
         id: entry.id,
         usage: entry.usage,

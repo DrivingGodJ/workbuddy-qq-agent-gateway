@@ -46,7 +46,7 @@ export class TriggerManager {
 
   async considerMessage(message) {
     if (!this.isAllowed(message.groupId)) return null;
-    if (message.eventType === "poke") {
+    if (message.eventType === "poke" && message.mentionedBot) {
       return this.request(message.groupId, "poke", message);
     }
     if (message.mentionedBot) {
@@ -68,7 +68,7 @@ export class TriggerManager {
     // In particular, an old OWNER mention must not replace a new member followup.
     const latestWake = [...group.pendingMessages].reverse().find((message) =>
       !message.readAt && Number(message.sequence) > Number(group.deferredThroughSequence || 0)
-      && (message.eventType === "poke" || message.mentionedBot));
+      && message.mentionedBot);
     if (latestWake) return this.request(groupId, latestWake.eventType === "poke" ? "poke" : "mention", latestWake);
     return null;
   }

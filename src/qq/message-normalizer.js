@@ -20,7 +20,7 @@ export function normalizeOneBotGroupPoke(payload, { now = () => new Date() } = {
   const groupId = asId(payload?.group_id);
   const timestamp = normalizeTimestamp(payload?.time, now);
   return {
-    messageId: String(payload?.notice_id ?? payload?.message_id ?? `poke:${groupId}:${senderId}:${targetId}:${timestamp.toISOString()}`),
+    messageId: `poke:${groupId}:${senderId}:${targetId}:${String(payload?.notice_id || payload?.message_id || timestamp.toISOString())}`,
     groupId,
     senderId,
     senderName: String(payload?.sender?.card || payload?.sender?.nickname || senderId || "群成员").trim(),
