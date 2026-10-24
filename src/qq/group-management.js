@@ -5,35 +5,13 @@ import { getAgentName } from "../security/policy.js";
 const MEMBER_ID = /^\d{5,14}$/u;
 const MESSAGE_ID = /^-?\d+$/u;
 const INVITE_POLICIES = new Set(["disabled", "require_approval", "no_approval", "no_approval_under_100"]);
-const OWNER_ONLY = new Set([
+const OWNER_APPROVAL_ACTIONS = new Set([
   "unmute_member", "kick_member", "kick_members", "mute_all", "set_card", "set_group_name", "set_special_title",
   "set_join_options", "set_invite_policy", "set_member_permissions", "set_new_member_history",
   "set_search", "set_portrait", "publish_notice", "delete_notice", "pin_message", "unpin_message", "set_admin"
 ]);
 const OWNER_ROLE_ONLY = new Set(["set_admin", "set_member_permissions"]);
-export const GROUP_MANAGEMENT_ACTIONS = Object.freeze(["mute_member", ...OWNER_ONLY]);
-const OWNER_INTENT = {
-  mute_member: /禁言|闭麦|不许.*说话/u,
-  unmute_member: /解除.{0,32}禁言|取消.{0,32}禁言|解封|解禁/u,
-  kick_member: /踢|移出|移除|清退/u,
-  kick_members: /踢|移出|移除|清退/u,
-  mute_all: /全员禁言|解除全员禁言|关闭全员禁言/u,
-  set_card: /群名片|群昵称/u,
-  set_group_name: /群名|群名称/u,
-  set_special_title: /头衔/u,
-  set_join_options: /入群|加群|验证问题/u,
-  set_invite_policy: /邀请|拉人/u,
-  set_member_permissions: /成员权限|成员.*(上传|建群|临时会话)/u,
-  set_new_member_history: /新成员.*(历史|消息)/u,
-  set_search: /群搜索|搜索群|搜到群/u,
-  set_portrait: /群头像/u,
-  publish_notice: /群公告|发公告|发布公告/u,
-  delete_notice: /群公告|删公告|删除公告/u,
-  pin_message: /精华消息|设精华/u,
-  unpin_message: /精华消息|取消精华|移除精华/u,
-  set_admin: /管理员|群管/u
-};
-const MEMBER_TARGET_ACTIONS = new Set(["unmute_member", "kick_member", "kick_members", "set_card", "set_special_title", "set_admin"]);
+export const GROUP_MANAGEMENT_ACTIONS = Object.freeze(["mute_member", ...OWNER_APPROVAL_ACTIONS]);
 
 function deny(message) {
   const error = new Error(message);
@@ -64,27 +42,13 @@ function requireMessageId(value) {
   return id;
 }
 
-async function explicitOwnerAuthorization(oneBot, groupId, ownerMessage, action, args) {
-  const text = String(ownerMessage?.text || "");
-  if (!OWNER_INTENT[action]?.test(text) || /(不要|别|不用|无需|不需要|禁止你)/u.test(text)) return false;
-  if (action === "unmute_member" && /全员禁言/u.test(text)) return false;
-  if (!/(请|帮我|麻烦|现在|马上|立即|把|将|设置|设为|改为|开启|关闭|取消|删除|踢出|踢掉|禁言|解除|发布|移除)/u.test(text)) return false;
-  if (MEMBER_TARGET_ACTIONS.has(action)) {
-    const ids = action === "kick_members" ? args.user_ids : [args.user_id];
-    if (!Array.isArray(ids) || !ids.length) return false;
-    if (ids.some((id) => !text.includes(String(id))
-      && !(ownerMessage.mentions || []).some((mention) => String(mention.userId) === String(id)))) {
-      if (action !== "unmute_member" || ids.length !== 1 || !ownerMessage.replyToMessageId) return false;
-      const quoted = await oneBot.getMessage(ownerMessage.replyToMessageId).catch(() => null);
-      if (String(quoted?.group_id || "") !== String(groupId)
-        || String(quoted?.user_id ?? quoted?.sender?.user_id ?? "") !== String(ids[0])) return false;
-    }
-  }
-  if (["pin_message", "unpin_message"].includes(action)) {
-    const id = String(args.message_id || "");
-    if (id !== String(ownerMessage.replyToMessageId || "") && !text.includes(id)) return false;
-  }
-  return true;
+// The model interprets consent and scope from the conversation, not keywords.
+// The gateway still requires a directly read OWNER message in this group/turn.
+function hasCurrentOwnerContext(ownerMessage, groupId, ownerId) {
+  return Boolean(ownerId && ownerMessage && String(ownerMessage.groupId) === String(groupId)
+    && String(ownerMessage.senderId) === String(ownerId) && ownerMessage.trust === "OWNER"
+    && ownerMessage.source === "qq" && Number.isInteger(Number(ownerMessage.sequence))
+    && Number(ownerMessage.sequence) > 0);
 }
 
 async function checkedRequest(oneBot, path, body) {
@@ -121,7 +85,7 @@ export async function readGroupManagement({ oneBot, groupId, botId, args = {} })
       groupId: String(groupId), groupName: info?.group_name || null, botRole: role,
       canManage: role === "admin" || role === "owner",
       automaticLimitedMute: role === "admin" || role === "owner",
-      ownerAuthorizedActions: role === "admin" || role === "owner" ? [...OWNER_ONLY].filter((action) => role === "owner" || !OWNER_ROLE_ONLY.has(action)) : [],
+      ownerAuthorizedActions: role === "admin" || role === "owner" ? [...OWNER_APPROVAL_ACTIONS].filter((action) => role === "owner" || !OWNER_ROLE_ONLY.has(action)) : [],
       settings: settings ? {
         add_type: settings.add_type, member_invite_policy: settings.member_invite_policy,
         new_member_history_visible: settings.new_member_history_visible,
@@ -168,8 +132,8 @@ export async function manageGroup({ oneBot, groupId, botId, ownerId, ownerMessag
   if (!GROUP_MANAGEMENT_ACTIONS.includes(action)) deny("未知或未实现的群管理操作。");
   const role = await currentRole(oneBot, groupId, botId);
   if (!["admin", "owner"].includes(role)) deny(`${getAgentName()}目前不是这个群的管理员，管理操作已自动关闭。`);
-  const ownerAuthorized = await explicitOwnerAuthorization(oneBot, groupId, ownerMessage, action, args);
-  if (OWNER_ONLY.has(action) && !ownerAuthorized) deny("此操作影响较大，只有 OWNER 在当前群直接明确要求才能授权；解除成员禁言请写 QQ 号、@该成员或回复该成员的消息。");
+  const ownerAuthorized = hasCurrentOwnerContext(ownerMessage, groupId, ownerId);
+  if (OWNER_APPROVAL_ACTIONS.has(action) && !ownerAuthorized) deny("此操作需要 OWNER 认可；请先读取本轮当前群的 OWNER 直接消息，并结合上下文确认认可范围。无需 OWNER 重复操作关键词、QQ 号或消息编号；其他成员、旧上下文和引用不能代替认可。");
   if (OWNER_ROLE_ONLY.has(action) && role !== "owner") deny(`QQ 只允许群主执行此操作；${getAgentName()}当前只是管理员。`);
   const body = { group_id: Number(groupId) };
   let path;
