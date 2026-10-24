@@ -86,8 +86,8 @@ const allTools = [
   },
   {
     name: "wait_for_messages",
-    description: "与 read_messages 共用未读增量：若已有未读，立即按原顺序返回，包括你已发送的 SELF 消息，不进入等待；只有没有未读时才等新消息，最多 30 秒，收到即返回。读取后标记已读，下次不重复；pending 不清理。SELF 仅供定位发言时间，不要回复自己。先调用 read_messages。",
-    inputSchema: { type: "object", properties: { seconds: { type: "integer", minimum: 1, maximum: 30, description: "本次最多等待多少秒" } }, required: ["seconds"], additionalProperties: false }
+    description: "与 read_messages 共用未读增量：若已有未读，立即按原顺序返回，包括你已发送的 SELF 消息，不进入等待；只有没有未读时才等新消息，单次最多 120 秒（两分钟），收到即返回。读取后标记已读，下次不重复；pending 不清理。SELF 仅供定位发言时间，不要回复自己。先调用 read_messages。",
+    inputSchema: { type: "object", properties: { seconds: { type: "integer", minimum: 1, maximum: 120, description: "本次最多等待多少秒" } }, required: ["seconds"], additionalProperties: false }
   },
   {
     name: "send_message",
@@ -240,7 +240,7 @@ for await (const line of lines) {
         headers: { "content-type": "application/json", "x-qq-mcp-secret": secret },
         body: JSON.stringify({ threadId, name: request.params?.name, arguments: request.params?.arguments || {} }),
         signal: AbortSignal.timeout(request.params?.name === "wait_for_messages"
-          ? Math.min(36_000, Number(request.params?.arguments?.seconds || 0) * 1000 + 6000)
+          ? Math.min(126_000, Number(request.params?.arguments?.seconds || 0) * 1000 + 6000)
           : 15_000)
       });
       if (!response.ok) throw new Error(`QQ gateway rejected MCP call: HTTP ${response.status}`);

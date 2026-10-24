@@ -100,7 +100,7 @@ for (const type of ["group", "private"]) {
     await f.call("send_message", { text: "my own reply" });
     await f.append(type, target, "103", "arrived after my reply");
     f.store.waitForNewMessages = () => assert.fail("existing unread messages must never start a wait");
-    const result = text(await f.call("wait_for_messages", { seconds: 30 }));
+    const result = text(await f.call("wait_for_messages", { seconds: 120 }));
     assert.ok(result.indexOf("arrived before send confirmation") < result.indexOf("my own reply"));
     assert.ok(result.indexOf("my own reply") < result.indexOf("arrived after my reply"));
     assert.match(result, /SELF 已发送/);
@@ -120,11 +120,11 @@ for (const type of ["group", "private"]) {
       waits++;
       await f.append(type, target, "104", "fresh reply while waiting");
     };
-    const self = text(await f.call("wait_for_messages", { seconds: 30 }));
+    const self = text(await f.call("wait_for_messages", { seconds: 120 }));
     assert.equal(waits, 0);
     assert.match(self, /just sent by me/);
     assert.match(self, /本批只有你已发送的消息/);
-    const reply = text(await f.call("wait_for_messages", { seconds: 30 }));
+    const reply = text(await f.call("wait_for_messages", { seconds: 120 }));
     assert.equal(waits, 1);
     assert.match(reply, /fresh reply while waiting/);
     assert.doesNotMatch(reply, /just sent by me/);

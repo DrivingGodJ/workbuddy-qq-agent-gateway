@@ -428,11 +428,11 @@ test("non-owner private Agent turns use scoped QQ MCP without embedding all stic
   assert.equal(f.store.snapshot(f.targetId).lastError, null);
 });
 
-test("active wait wakes directly on new text rather than waiting out thirty seconds", async (t) => {
+test("active wait wakes directly on new text rather than waiting out two minutes", async (t) => {
   const f = await fixture(t);
   const ctx = f.context(await f.store.beginWork("12345"));
   await ctx.liveTool("read_messages", {}, f.active);
-  const waited = ctx.liveTool("wait_for_messages", { seconds: 30 }, f.active);
+  const waited = ctx.liveTool("wait_for_messages", { seconds: 120 }, f.active);
   assert.equal(f.store.messageEvents.listenerCount("12345"), 1);
   await f.append("arrived while waiting");
   const result = await Promise.race([waited, pause(150).then(() => "timeout")]);

@@ -221,7 +221,7 @@ export function buildMcpTurnPrompt({ includeBaseInstructions = false, trigger = 
   return [
     ...lines,
     "当前 QQ 工具清单已固定直接加载。若本轮包含网关预读取结果，消息已由 read_messages 同一路径提供，可直接决定动作，不必重复空读；否则先直接调用 mcp__qq_gateway__read_messages 读取未处理消息与订阅背景。后续新消息仍通过 read_messages 读取。合并转发与链接按需用 read_forward_messages、read_link；群内真正 @个人用 send_message 的 segments。所有 QQ 动作直接调用本轮对应的 mcp__qq_gateway__ 工具，不经 ToolSearch 或 DeferExecuteTool。不要凭旧上下文猜测新消息。",
-    "根据读取结果自行决定是否回复、回复几次以及使用文字、图片、文件、表情、戳一戳或动态；工具确认成功即已送达。要说文字时必须调用 send_message；最终文字不会自动发送到 QQ。可以反复 read_messages，或用 wait_for_messages 等接话（最多 30 秒，新消息立即返回）。不想继续可直接结束模型轮次，或调用 end_conversation；程序会自动保持两分钟接话运行，不需要你开启等待。有新消息会立即续接，可回复也可沉默；每轮结束重新等待，连续两分钟无消息才真正退出。最终回复不复述已发送内容。读取或发送失败时停止，不要立即重复发送。"
+    "根据读取结果自行决定是否回复、回复几次以及使用文字、图片、文件、表情、戳一戳或动态；工具确认成功即已送达。要说文字时必须调用 send_message；最终文字不会自动发送到 QQ。可以反复 read_messages，或用 wait_for_messages 等接话（单次最多 120 秒，新消息立即返回）。不想继续可直接结束模型轮次，或调用 end_conversation；程序会自动保持两分钟接话运行，不需要你开启等待。有新消息会立即续接，可回复也可沉默；每轮结束重新等待，连续两分钟无消息才真正退出。最终回复不复述已发送内容。读取或发送失败时停止，不要立即重复发送。"
   ].join("\n");
 }
 

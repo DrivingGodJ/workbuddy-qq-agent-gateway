@@ -57,6 +57,7 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
     assert.equal(groupTools.some((tool) => tool.name === name), false);
   }
   const byName = Object.fromEntries(groupTools.map((tool) => [tool.name, tool]));
+  assert.equal(byName.wait_for_messages.inputSchema.properties.seconds.maximum, 120);
   assert.deepEqual(byName.read_context_messages.inputSchema.properties.target_type.enum, ["group", "private"]);
   assert.equal(byName.read_context_messages.inputSchema.properties.limit.maximum, 40);
   assert.equal(byName.read_context_messages.inputSchema.additionalProperties, false);
@@ -69,6 +70,28 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   assert.equal(byName.send_message.inputSchema.properties.reply_to_message_id.pattern, "^-?[0-9]+$");
   assert.deepEqual(byName.poke_member.inputSchema.properties.user_id.oneOf[0], { const: "sender" });
   assert.match(byName.engage_qzone_feed.description, /聊天和定时动态任务使用同一工具/);
+});
+
+test("MCP transport allows a full two-minute active wait without extending ordinary calls", () => {
+  const server = new URL("../modules/workbuddy-agent/qq-mcp-stdio.mjs", import.meta.url).href;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    let timeoutMs;
+    AbortSignal.timeout = (ms) => { timeoutMs = ms; return new AbortController().signal; };
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ content: [{ type: "text", text: String(timeoutMs) }] }) });
+    process.argv[2] = "thread-test";
+    await import(${JSON.stringify(server)});
+  `], {
+    input: [
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "wait_for_messages", arguments: { seconds: 120 } } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "read_messages", arguments: {} } }
+    ].map((request) => JSON.stringify(request)).join("\n") + "\n",
+    encoding: "utf8", timeout: 3000,
+    env: { ...process.env, CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT: "http://127.0.0.1:3789/call",
+      CODEX_REMOTE_CONTACT_QQ_MCP_SECRET: "test-secret", CODEX_REMOTE_CONTACT_QQ_MCP_SOURCE_ONLY: "0" }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const responses = result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(responses.map((response) => response.result.content[0].text), ["126000", "15000"]);
 });
 
 test("stable gateway rules distinguish live MCP sends from structured AUTO and scheduled Space turns", () => {

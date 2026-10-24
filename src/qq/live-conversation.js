@@ -11,7 +11,7 @@ import { isPokeEvent } from "../security/reply-reference.js";
 
 const PAGE_SIZE = 40;
 const MAX_WAIT_MS = 8000;
-const MAX_ACTIVE_WAIT_SECONDS = 30;
+const MAX_ACTIVE_WAIT_SECONDS = 120;
 const SCHEDULED_QZONE_FEED_TOOLS = new Set(["read_qzone_feed_batch", "submit_qzone_decisions"]);
 const SCHEDULED_QZONE_POST_TOOLS = new Set(["propose_qzone_post", "skip_qzone_post"]);
 

@@ -423,12 +423,21 @@ test("read_messages can wait for new text without rereading old content", async 
 });
 
 test("the Agent can actively wait for another member before sending again", async (t) => {
-  const { context, active, append } = await fixture(t);
+  const { store, context, active, append } = await fixture(t);
   assert.equal((await context.liveTool("wait_for_messages", { seconds: 1 }, active)).isError, true);
   await context.liveTool("read_messages", {}, active);
-  assert.equal((await context.liveTool("wait_for_messages", { seconds: 31 }, active)).isError, true);
+  for (const seconds of [0, 1.5, 121]) {
+    assert.equal((await context.liveTool("wait_for_messages", { seconds }, active)).isError, true);
+  }
+  const originalWait = store.waitForNewMessages.bind(store);
+  let timeoutMs;
+  store.waitForNewMessages = (target, options) => {
+    timeoutMs = options.timeoutMs;
+    return originalWait(target, options);
+  };
   setTimeout(() => append("reply", "其他人接话了"), 20);
-  const waited = await context.liveTool("wait_for_messages", { seconds: 1 }, active);
+  const waited = await context.liveTool("wait_for_messages", { seconds: 120 }, active);
+  assert.ok(timeoutMs > 30_000 && timeoutMs <= 120_000, `unexpected wait deadline: ${timeoutMs}`);
   assert.match(waited.content[0].text, /其他人接话了/);
   assert.equal(context.lastReadSequence, 2);
 });
