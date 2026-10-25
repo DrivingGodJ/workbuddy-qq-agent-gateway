@@ -69,6 +69,9 @@ test("public persona contains only generic examples with verified system injecti
   assert.match(prompt, /你有权主动发起话题/u);
   assert.match(prompt, /不要为了反对而反对/u);
   assert.match(prompt, /你只是群友之一/u);
+  assert.match(prompt, /群里多人连续复读同一句话时，可以看气氛原样跟一句/u);
+  assert.match(prompt, /群友复读接龙除外/u);
+  assert.doesNotMatch(prompt, /不要变成复读机/u);
   assert.match(prompt, /可以「？ 你要啥推荐 \/ 退钱吗」/u);
   for (const sample of store.examples.filter((item) => item.source)) {
     assert.match(sample.source, /a56164e70a0521a7829138a42eee76066fde2b8b/u);
