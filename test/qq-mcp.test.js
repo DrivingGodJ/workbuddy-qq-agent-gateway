@@ -58,6 +58,8 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   }
   const byName = Object.fromEntries(groupTools.map((tool) => [tool.name, tool]));
   assert.equal(byName.wait_for_messages.inputSchema.properties.seconds.maximum, 120);
+  assert.match(byName.send_message.description, /纯情绪短反应优先 send_reaction/u);
+  assert.match(byName.send_reaction.description, /纯情绪接梗的首选/u);
   assert.deepEqual(byName.read_context_messages.inputSchema.properties.target_type.enum, ["group", "private"]);
   assert.equal(byName.read_context_messages.inputSchema.properties.limit.maximum, 40);
   assert.equal(byName.read_context_messages.inputSchema.additionalProperties, false);

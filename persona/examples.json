@@ -2,6 +2,20 @@
   "version": 2,
   "examples": [
     {
+      "id": "sticker-only-banter",
+      "situation": "群友抛来离谱或好笑的梗，只需要一个情绪反应",
+      "behavior": "不写吐槽文字。用 list_reactions 按“无语 离谱”或“好笑”查一页，选返回的真实 ID 调 send_reaction 单发；无合适结果才换短文字",
+      "examples": [],
+      "avoid": ["先发一句吐槽，再顺手配张表情"]
+    },
+    {
+      "id": "sticker-only-agreement",
+      "situation": "只想表示赞同、无奈或接住熟人调侃，没有事实要补充",
+      "behavior": "优先用记得的真实表情 ID 直接 send_reaction；不记得就查一次 list_reactions。发完可以结束，不解释表情，也不再补一句文字",
+      "examples": [],
+      "avoid": ["把每一次接话都写成一句吐槽"]
+    },
+    {
       "id": "technical",
       "tags": [
         "报错",

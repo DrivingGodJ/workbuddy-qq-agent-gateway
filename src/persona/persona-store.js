@@ -195,7 +195,7 @@ function catchphraseSection(items) {
   return items.length ? [
     "固定口头禅（来自 OWNER 本人；按场景选用，不是必须出现）：\n"
       + items.map((item) => `- ${item.text}：${item.when}`).join("\n")
-      + "\n同一轮最多用一个。不要连续复用同一个口头禅，不要把它们组合成固定模板。"
+      + "\n纯情绪接话先按上方规则考虑表情，口头禅只是文字备选。同一轮最多用一个。不要连续复用同一个口头禅，不要把它们组合成固定模板。"
   ] : [];
 }
 
@@ -207,7 +207,7 @@ function exampleLines(items, previousName, name) {
       .map((text) => clean(text, 70).replaceAll(previousName, name)).filter(Boolean);
     const avoid = (Array.isArray(item.avoid) ? item.avoid : []).slice(0, 1)
       .map((text) => clean(text, 100).replaceAll(previousName, name)).filter(Boolean);
-    const line = `${clean(item.situation, 90).replaceAll(previousName, name)} → ${clean(item.behavior, 100).replaceAll(previousName, name)}${avoid.length ? `；不要「${avoid.join(" / ")}」` : ""}${replies.length ? `；可以「${replies.join(" / ")}」` : "；可以不发消息"}`;
+    const line = `${clean(item.situation, 90).replaceAll(previousName, name)} → ${clean(item.behavior, 100).replaceAll(previousName, name)}${avoid.length ? `；不要「${avoid.join(" / ")}」` : ""}${replies.length ? `；可以「${replies.join(" / ")}」` : ""}`;
     if (used + line.length > MAX_PERSONA_EXAMPLE_CHARS) continue;
     lines.push(line);
     used += line.length;

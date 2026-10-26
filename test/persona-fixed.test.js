@@ -86,6 +86,23 @@ test("daily style capture and scheduled summary are not wired into the gateway",
   assert.doesNotMatch(source, /DailyStyleCoordinator|dailyStyle\.|persona-style-samples/u);
 });
 
+test("sticker-only scenarios are injected as tool actions without a spurious silence fallback", async (t) => {
+  const { store } = await fixture(t);
+  const prompt = store.systemPromptForClient();
+  assert.match(prompt, /默认先选 QQ 原生表情包，不先写一句文字/u);
+  assert.match(prompt, /表情优先于短吐槽和口头禅/u);
+  assert.match(prompt, /口头禅只是文字备选/u);
+  const scenes = prompt.split("\n").filter((line) => /群友抛来离谱或好笑的梗|只想表示赞同、无奈/.test(line));
+  assert.equal(scenes.length, 2);
+  for (const line of scenes) {
+    assert.match(line, /list_reactions/u);
+    assert.match(line, /send_reaction/u);
+    assert.doesNotMatch(line, /可以不发消息|；可以「/u);
+  }
+  assert.match(prompt, /不为凑比例硬发/u);
+  assert.equal(store.publicState().injectedExampleCount, store.examples.length);
+});
+
 test("event status ring cannot retain chat bodies, replies, tools payloads or attachments", () => {
   assert.deepEqual(eventMetadata({ type: "turn-completed", groupId: "123456789", at: "now", count: 2,
     message: { text: "SECRET", images: ["PRIVATE"] }, reply: "SECRET", text: "SECRET",
