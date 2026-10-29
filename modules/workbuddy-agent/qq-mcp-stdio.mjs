@@ -91,7 +91,7 @@ const allTools = [
   },
   {
     name: "send_message",
-    description: "向当前会话立即发文字，本轮可多次调用。用于事实、观点、答疑和任务结果；先考虑 send_reaction 接情绪，纯情绪可不发文字，情绪之外有具体问题再补文字。不记得真实表情 ID 先 list_reactions。默认普通发言；想引用当前会话已读的某条消息时才填 reply_to_message_id，可在第一条或后续任意一条发送时选择。text 与 segments 二选一；真正 @个人仅群聊使用 segments。",
+    description: "向当前会话立即发文字，本轮可多次调用。先考虑 send_reaction 接情绪，文字用于补充具体心意、事实、答疑和任务结果；有具体问题再补文字。不记得真实表情 ID 先 list_reactions。默认普通发言；想引用当前会话已读的某条消息时才填 reply_to_message_id，可在第一条或后续任意一条发送时选择。text 与 segments 二选一；真正 @个人仅群聊使用 segments。",
     inputSchema: {
       type: "object", properties: {
         text: { type: "string", description: "纯文字，不含 [[qq_*]] 指令" },
@@ -159,7 +159,7 @@ const allTools = [
   },
   {
     name: "list_reactions",
-    description: "用 1–3 个场景短词搜索真实收藏表情包与内置表情，如 无语 离谱；不要整句搜索。优先从 stickers 选贴切的返回 ID 给 send_reaction，可单发不用配字；空值浏览。默认各取 8 个，可用 nextOffset 翻页，不必遍历全库。不要猜名称或 ID。",
+    description: "用 1–3 个场景短词搜索真实收藏表情包与内置表情，如 开心 害羞、抱抱 安慰、好奇 探头；不要整句搜索。优先从 stickers 选贴切的返回 ID 给 send_reaction，可单发不用配字；空值浏览。默认各取 8 个，可用 nextOffset 翻页，不必遍历全库。不要猜名称或 ID。",
     inputSchema: { type: "object", properties: {
       query: { type: "string", maxLength: 80, description: "场景关键词，如 无语、疑惑、开心；空值浏览" },
       offset: { type: "integer", minimum: 0 },
@@ -168,7 +168,7 @@ const allTools = [
   },
   {
     name: "send_reaction",
-    description: "纯情绪接梗的首选，也是轻松回答时接情绪的优先动作：立即发送内置表情或收藏表情包，代替一句短吐槽或口头禅，可单发不用配字。有具体问题时可先发表情，再用 send_message 补必要内容；严肃或紧急事情先顾内容。记得网关曾提供的真实名称或 ID 可直接发送，不必每次 list_reactions；网关会核对整个当前可用库。未知或失效且明确未发送时再查找，不能猜 ID；发送结果不明不重试。不强凑文字或刷屏。",
+    description: "回应情绪的优先动作，也是纯情绪接梗的首选：立即发送内置表情或收藏表情包。招呼、开心、害羞、安慰、鼓励、认错、庆祝和告别都优先用表情回应；可单发，也可先发表情，再用 send_message 补必要内容。记得网关曾提供的真实名称或 ID 可直接发送，不必每次 list_reactions；网关会核对整个当前可用库。未知或失效且明确未发送时再查找，不能猜 ID；发送结果不明不重试。让表情自己传达情绪。",
     inputSchema: {
       type: "object", properties: {
         face: { type: "string", minLength: 1, description: "网关曾提供且记得的真实内置表情名称，不确定才查找" },

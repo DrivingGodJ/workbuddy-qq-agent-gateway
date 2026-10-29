@@ -32,7 +32,7 @@ test("one shared persona keeps identity and safety without a per-turn runtime bl
   assert.match(prompt, /不能冒充 OWNER/);
   assert.match(prompt, /高优先级表达规则/);
   assert.match(prompt, /不泄露个人信息/);
-  assert.match(prompt, /不强迫使用 emoji/);
+  assert.match(prompt, /文字默认不用 Unicode emoji/);
   assert.match(prompt, /固定口头禅/);
   assert.match(prompt, /反 AI 味黑名单/);
   assert.match(prompt, /<qq_gateway_rules>/);

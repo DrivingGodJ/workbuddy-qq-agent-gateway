@@ -111,9 +111,9 @@ export class PersonaStore {
       name: this.name(),
       source: this.core.source,
       summary: [
-        "短句、结论先行，不写客服腔",
-        "只在有兴趣、有价值或需要纠错时主动插话",
-        "文字、表情、戳一戳、等待和沉默是等价动作"
+        "温柔可爱、具体接话，有自己的好奇和小得意",
+        "主动分享、陪伴与接梗，尊重彼此聊天节奏",
+        "表情优先接情绪，文字自然补充具体内容"
       ],
       exampleCount: this.examples.length,
       injectedExampleCount: exampleLines(this.examples, this.core.name, this.name()).length,
@@ -195,7 +195,7 @@ function catchphraseSection(items) {
   return items.length ? [
     "固定口头禅（人格语料与手工偏好；按场景选用，不是必须出现）：\n"
       + items.map((item) => `- ${item.text}：${item.when}`).join("\n")
-      + "\n纯情绪接话先按上方规则考虑表情，口头禅只是文字备选。顺着眼前的话自然说，不按条目轮换，不凑数量，也不把它们组合成固定模板。"
+      + "\n先按上方规则用表情接情绪，口头禅只是文字备选。顺着眼前的话自然说，不按条目轮换，不凑数量，也不把它们组合成固定模板。"
   ] : [];
 }
 

@@ -62,6 +62,8 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   assert.match(byName.send_message.description, /有具体问题再补文字/u);
   assert.match(byName.send_reaction.description, /先发表情，再用 send_message 补必要内容/u);
   assert.match(byName.send_reaction.description, /纯情绪接梗的首选/u);
+  assert.match(byName.send_reaction.description, /安慰、鼓励、认错、庆祝和告别都优先用表情回应/u);
+  assert.doesNotMatch(byName.send_reaction.description, /严肃或紧急事情先顾内容|不强凑文字或刷屏/u);
   assert.deepEqual(byName.read_context_messages.inputSchema.properties.target_type.enum, ["group", "private"]);
   assert.equal(byName.read_context_messages.inputSchema.properties.limit.maximum, 40);
   assert.equal(byName.read_context_messages.inputSchema.additionalProperties, false);

@@ -72,7 +72,9 @@ test("public persona contains only generic examples with verified system injecti
   assert.match(prompt, /群里多人连续复读同一句话时，可以看气氛原样跟一句/u);
   assert.match(prompt, /群友复读接龙除外/u);
   assert.doesNotMatch(prompt, /不要变成复读机/u);
-  assert.match(prompt, /可以「？ 你要啥推荐 \/ 退钱吗」/u);
+  assert.match(prompt, /可以「你想找哪一类呀 \/ 想轻松一点还是热闹一点」/u);
+  assert.match(prompt, /性格底色是温柔、轻快、好奇/u);
+  assert.match(prompt, /先接他讲的事和感受/u);
   for (const sample of store.examples.filter((item) => item.source)) {
     assert.match(sample.source, /a56164e70a0521a7829138a42eee76066fde2b8b/u);
     for (const positive of sample.examples) assert.doesNotMatch(positive,
@@ -99,7 +101,9 @@ test("sticker-only scenarios are injected as tool actions without a spurious sil
     assert.match(line, /send_reaction/u);
     assert.doesNotMatch(line, /可以不发消息|；可以「/u);
   }
-  assert.match(prompt, /不为凑比例硬发/u);
+  assert.match(prompt, /表情包是老代最顺手的第一语言/u);
+  assert.match(prompt, /安慰、鼓励、庆祝、想念都可以用表情先回应/u);
+  assert.doesNotMatch(prompt, /不强迫使用 emoji 或表情包|不用表情拖延|不硬塞表情|不为凑比例硬发/u);
   assert.equal(store.publicState().injectedExampleCount, store.examples.length);
 });
 

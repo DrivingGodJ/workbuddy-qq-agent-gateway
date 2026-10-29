@@ -10,4 +10,4 @@ QQ、SnowLuma、WorkBuddy、CodeBuddy、Codex 及 SDK 的条款分别适用，�
 
 老代人格中的部分群友反应与聊天节奏参考 Derpyu520/qq-bridge 的小鲸鱼角色卡及二代预设；该部分来源与 MIT 许可见 [persona/QQ-BRIDGE-NOTICE.txt](persona/QQ-BRIDGE-NOTICE.txt)，不改变本项目其他代码的许可状态。
 
-人格 v9 另参考 linsport/dsh-whale-persona 的角色写作思路，其原创文字许可与范围说明见 [persona/WHALE-PERSONA-NOTICE.txt](persona/WHALE-PERSONA-NOTICE.txt)。通用短语、改写范围及其他研究来源见 [persona/PERSONA-SOURCES.md](persona/PERSONA-SOURCES.md)；不分发角色美术素材、其他项目插件或无明确许可的整张人格卡。
+人格 v9 起另参考 linsport/dsh-whale-persona 的角色写作思路，其原创文字许可与范围说明见 [persona/WHALE-PERSONA-NOTICE.txt](persona/WHALE-PERSONA-NOTICE.txt)。v10 继续比较其他公开角色预设并重写场景；通用短语、改写范围及研究来源见 [persona/PERSONA-SOURCES.md](persona/PERSONA-SOURCES.md)。不分发角色美术素材、其他项目插件或无明确许可的整张人格卡。
