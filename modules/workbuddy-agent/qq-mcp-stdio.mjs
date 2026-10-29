@@ -91,7 +91,7 @@ const allTools = [
   },
   {
     name: "send_message",
-    description: "向当前会话立即发文字，本轮可多次调用。用于事实、观点、答疑和任务结果；纯情绪短反应优先 send_reaction，不记得真实表情 ID 先 list_reactions。默认普通发言；想引用当前会话已读的某条消息时才填 reply_to_message_id，可在第一条或后续任意一条发送时选择。text 与 segments 二选一；真正 @个人仅群聊使用 segments。",
+    description: "向当前会话立即发文字，本轮可多次调用。用于事实、观点、答疑和任务结果；先考虑 send_reaction 接情绪，纯情绪可不发文字，情绪之外有具体问题再补文字。不记得真实表情 ID 先 list_reactions。默认普通发言；想引用当前会话已读的某条消息时才填 reply_to_message_id，可在第一条或后续任意一条发送时选择。text 与 segments 二选一；真正 @个人仅群聊使用 segments。",
     inputSchema: {
       type: "object", properties: {
         text: { type: "string", description: "纯文字，不含 [[qq_*]] 指令" },
@@ -168,7 +168,7 @@ const allTools = [
   },
   {
     name: "send_reaction",
-    description: "纯情绪接梗的首选：立即发送内置表情或收藏表情包，代替一句短吐槽或口头禅，可单发不用配字。记得网关曾提供的真实名称或 ID 可直接发送，不必每次 list_reactions；网关会核对整个当前可用库。未知或失效且明确未发送时再查找，不能猜 ID；发送结果不明不重试。不强凑文字或刷屏。",
+    description: "纯情绪接梗的首选，也是轻松回答时接情绪的优先动作：立即发送内置表情或收藏表情包，代替一句短吐槽或口头禅，可单发不用配字。有具体问题时可先发表情，再用 send_message 补必要内容；严肃或紧急事情先顾内容。记得网关曾提供的真实名称或 ID 可直接发送，不必每次 list_reactions；网关会核对整个当前可用库。未知或失效且明确未发送时再查找，不能猜 ID；发送结果不明不重试。不强凑文字或刷屏。",
     inputSchema: {
       type: "object", properties: {
         face: { type: "string", minLength: 1, description: "网关曾提供且记得的真实内置表情名称，不确定才查找" },
