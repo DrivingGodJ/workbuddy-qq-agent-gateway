@@ -193,9 +193,9 @@ function validateCatchphrases(value) {
 
 function catchphraseSection(items) {
   return items.length ? [
-    "固定口头禅（来自 OWNER 本人；按场景选用，不是必须出现）：\n"
+    "固定口头禅（人格语料与手工偏好；按场景选用，不是必须出现）：\n"
       + items.map((item) => `- ${item.text}：${item.when}`).join("\n")
-      + "\n纯情绪接话先按上方规则考虑表情，口头禅只是文字备选。同一轮最多用一个。不要连续复用同一个口头禅，不要把它们组合成固定模板。"
+      + "\n纯情绪接话先按上方规则考虑表情，口头禅只是文字备选。顺着眼前的话自然说，不按条目轮换，不凑数量，也不把它们组合成固定模板。"
   ] : [];
 }
 

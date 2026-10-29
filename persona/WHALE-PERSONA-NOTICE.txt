@@ -1,0 +1,55 @@
+Persona writing approach adapted from linsport/dsh-whale-persona
+https://github.com/linsport/dsh-whale-persona
+commit 4f884899df629b88c331e96151225dc825c15c96
+
+This applies to the adapted persona writing only. No artwork, identity,
+preset code, plugins or memory implementation is distributed here.
+The original license and its scope clarification follow.
+
+MIT License
+
+Copyright (c) 2026 鲸鱼娘 DSH 预设 贡献者
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 关于美术素材与人设文本（重要，请一并阅读）
+
+本 MIT 许可**仅覆盖本项目自己撰写的部分**：即 `cordis.patch.yml` 的预设装配代码、
+`_生成预设.cjs`、`安装.ps1`、`卸载.ps1`、`package.json`，以及 `人设原文.md` 中
+由本项目原创的文字表述。
+
+以下内容**不在** MIT 覆盖范围内：
+
+1. **「鲸鱼娘 / 大肥鱼」这一视觉形象** —— 它是社区二创产物，出处可追溯到画师
+   「上善无形」的原创角色，后续由 ZipZipPipe 等人二次设计。该形象的权利归原始
+   创作者所有，本项目**不主张任何权利**，也**不随附任何图片素材**。
+   相关形象的使用（尤其商业用途）请自行确认授权。
+
+2. **DSH（DeepSeek Harness）本身的插件清单片段** —— `cordis.patch.yml` 中的插件
+   声明由官方 standard 预设派生，官方代码以 MIT 许可发布，本项目在此依其条款
+   引用。
+
+3. **人设文本的灵感来源** —— 本预设的人设改编自社区广泛流传的 DeepSeek 角色扮演
+   提示词（俗称「鲸鱼娘神秘代码」及各类 v0.xx 聊天版）。这些文本为社区创作，
+   原作者多为匿名，本项目在原作基础上做了面向 DSH 编码场景的重写。
+
+如果你是本项目所引用内容的权利人，认为此处使用不当，请开 issue 说明，我们会
+立即调整或移除。
