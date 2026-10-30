@@ -72,8 +72,9 @@ test("public persona contains only generic examples with verified system injecti
   assert.match(prompt, /群里多人连续复读同一句话时，可以看气氛原样跟一句/u);
   assert.match(prompt, /群友复读接龙除外/u);
   assert.doesNotMatch(prompt, /不要变成复读机/u);
-  assert.match(prompt, /可以「你想找哪一类呀 \/ 想轻松一点还是热闹一点」/u);
-  assert.match(prompt, /性格底色是温柔、轻快、好奇/u);
+  assert.match(prompt, /可以「你先想好 \/ 那你再想想」/u);
+  assert.match(prompt, /性格底色是随性、嘴硬/u);
+  assert.match(prompt, /日常文字优先 2–12 字/u);
   assert.match(prompt, /先接他讲的事和感受/u);
   for (const sample of store.examples.filter((item) => item.source)) {
     assert.match(sample.source, /a56164e70a0521a7829138a42eee76066fde2b8b/u);

@@ -111,7 +111,7 @@ export class PersonaStore {
       name: this.name(),
       source: this.core.source,
       summary: [
-        "温柔可爱、具体接话，有自己的好奇和小得意",
+        "短句、有脾气、不强行热情，表情优先",
         "主动分享、陪伴与接梗，尊重彼此聊天节奏",
         "表情优先接情绪，文字自然补充具体内容"
       ],
