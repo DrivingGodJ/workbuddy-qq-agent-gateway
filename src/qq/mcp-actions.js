@@ -4,6 +4,13 @@ import { searchReactions } from "./reaction-search.js";
 const STICKER_ID = /^st_[a-f0-9]{12,64}$/u;
 const QQ_ID = /^\d{5,14}$/u;
 
+export function messageFormatError(message) {
+  const prose = String(message).replace(/```[\s\S]*?```|`[^`]*`|“[^”]*”|「[^」]*」|"[^"\n]*"/gu, "");
+  return /<\/text>\s*$/iu.test(prose) && !/<text(?:\s[^>]*)?>/iu.test(prose)
+    ? "正文末尾有孤立的 </text> 内部标签，消息尚未发送。请去掉该标签后重新提交；若确实要讨论标签，请用反引号引用。不要撤回其他消息。"
+    : null;
+}
+
 export function handleQqMcpTool({ name, args = {}, context, queued = [] }) {
   if (!context || typeof context !== "object") return failure("当前轮次不可调用 QQ MCP 工具。");
   if (name === "read_messages") {
@@ -44,6 +51,9 @@ export function handleQqMcpTool({ name, args = {}, context, queued = [] }) {
       }
     } catch (error) { return failure(error.message); }
     if (!message || message.length > 12_000) return failure("消息正文须为 1–12000 字。");
+    // Validate the combined body so split text segments cannot leak a wrapper.
+    const formatError = messageFormatError(message);
+    if (formatError) return failure(formatError);
     if (/\[\[qq_[^\]]*\]\]/iu.test(message)) return failure("消息正文不能包含 QQ 动作指令；请分别使用对应的 MCP 工具。");
     if (queued.some((item) => item.kind === "message")) return failure("本轮已提交一条文字消息，请不要重复提交。");
     queued.push({ kind: "message", text: message, ...(segments ? { segments } : {}), replyToMessageId });

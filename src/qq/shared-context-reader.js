@@ -2,6 +2,7 @@ import { unreadConversationMessages } from "../groups/group-state.js";
 import { compactMessageContext } from "../security/message-context.js";
 import { sanitizeGroupReply } from "../security/policy.js";
 import { isPokeEvent } from "../security/reply-reference.js";
+import { messageFormatError } from "./mcp-actions.js";
 
 const QQ_ID = /^[0-9]{5,14}$/u;
 const ARGUMENTS = new Set(["target_type", "target_id", "offset", "limit"]);
@@ -109,6 +110,8 @@ export function createSharedContextReader({
     return answer(output);
   };
   reader.send = async (args = {}, active) => {
+    const formatError = messageFormatError(args?.text || "");
+    if (formatError) return answer(formatError, true);
     if (!args || typeof args !== "object" || Array.isArray(args)
       || Object.keys(args).some((key) => !["target_type", "target_id", "text", "reply_to_message_id"].includes(key))
       || !["group", "private"].includes(args.target_type) || typeof args.target_id !== "string" || !QQ_ID.test(args.target_id)
