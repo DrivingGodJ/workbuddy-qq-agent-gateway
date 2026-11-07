@@ -1,29 +1,19 @@
-# Codex CLI Module / Codex CLI 模块
+**简体中文** | [English](README.en.md)
 
-Codex app-server integration is implemented in `src/codex/client.js`.
+# Codex CLI 兼容模块
 
-Codex app-server 集成逻辑位于 `src/codex/client.js`。
+为网关保留 Codex app-server 兼容接入，实现在仓库根目录的 `src/codex/client.js`。主项目默认围绕 WorkBuddy 设计，两种引擎的能力不保证完全一致。
 
-Default CLI path / 默认 CLI 路径：
+## 使用方式
 
-```text
-/Applications/Codex.app/Contents/Resources/codex
-```
-
-Override with / 可通过环境变量覆盖：
+默认 CLI 路径为 `/Applications/Codex.app/Contents/Resources/codex`。可在部署环境中覆盖：
 
 ```bash
 CODEX_CLI_PATH=/path/to/codex
 ```
 
-兼容引擎的 QQ 群持久会话使用与 WorkBuddy 相同的隔离工作区：
+上例中的路径需替换为实际可执行文件；按[主项目配置说明](../../README.md)启用对应兼容路径。
 
-```text
-runtime/group-workspaces/<groupId>/
-```
+## 会话与数据
 
-Each QQ group maps to one persistent Codex thread. Thread IDs and pending
-messages are stored in `runtime/qq-only-data/group-sessions.json`.
-
-每个 QQ 群绑定一条持久 Codex thread；threadId 与 pending 消息保存在
-`runtime/qq-only-data/group-sessions.json`。
+每个 QQ 群映射到一条持久 Codex thread。群工作区与 WorkBuddy 使用相同的隔离目录 `runtime/group-workspaces/<groupId>/`；threadId 和 pending 消息保存在 `runtime/qq-only-data/group-sessions.json`。以上均相对仓库根目录，属于不应公开提交的运行数据。

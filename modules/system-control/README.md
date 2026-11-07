@@ -1,10 +1,12 @@
-# System Control Module / 系统控制模块
+**简体中文** | [English](README.en.md)
 
-Scripts in this folder manage display sleep, keep-awake, and built-in display backlight.
+# 系统控制模块
 
-这个目录里的脚本用于管理显示器休眠、防休眠和内置屏背光。
+用于 macOS 显示器休眠、防休眠和内置屏背光的脚本。通用网关配置见[项目首页](../../README.md)。
 
-Useful commands / 常用命令：
+## 使用方式
+
+在本目录运行所需命令；这些命令会实际改变显示或防休眠状态：
 
 ```bash
 ./build-backlight-helper.command
@@ -14,13 +16,10 @@ Useful commands / 常用命令：
 ./stop-keep-awake.command
 ```
 
-`backlight-off-keep-awake.command` uses a small C helper compiled from `src/codexremotecontact-backlight.c`. The helper only targets online built-in displays and skips external displays.
+按操作目的选择单条命令，不要将全部命令作为安装流程连续执行。
 
-`backlight-off-keep-awake.command` 使用由 `src/codexremotecontact-backlight.c` 编译出来的小型 C helper。它只处理在线的内置显示器，并跳过外接显示器。
+## 依赖与约束
 
-Requirements / 依赖：
+编译辅助程序需要 Xcode Command Line Tools。`brightness` 为可选的调试与后备工具。
 
-- Xcode Command Line Tools for compiling the helper.
-- Xcode Command Line Tools：用于编译 helper。
-- `brightness` is optional but useful for debugging and fallback workflows.
-- `brightness` 可选，适用于电脑GUI控制。
+`backlight-off-keep-awake.command` 使用由本模块 `src/codexremotecontact-backlight.c` 编译的 C 辅助程序，仅处理在线内置屏，跳过外接显示器。
