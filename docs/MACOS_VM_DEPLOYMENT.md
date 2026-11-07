@@ -53,7 +53,7 @@ Mac 的日常 QQ 大号不需要退出；机器人小号登录容器里的 Linux
 
 ## 3. 新机器建立虚拟机和镜像
 
-先安装本项目 [README](../README.md#环境要求) 中的 Node、Python 与已登录 CLI。另需 Homebrew、Colima、Docker CLI、buildx 和 GitHub CLI；不要求同时运行 Docker Desktop。以下命令在 Mac 终端执行。
+先安装本项目 [README](readme-reference.zh-CN.md#环境要求) 中的 Node、Python 与已登录 CLI。另需 Homebrew、Colima、Docker CLI、buildx 和 GitHub CLI；不要求同时运行 Docker Desktop。以下命令在 Mac 终端执行。
 
 ```bash
 brew install colima docker docker-buildx gh
@@ -147,7 +147,7 @@ CODEX_REMOTE_CONTACT_NODE_PATH=/opt/homebrew/bin/node
 CODEX_REMOTE_CONTACT_QQ_FILE_STAGING_ROOT=/tmp/codexremotecontact-qq-files
 ```
 
-这些只是配套参数，不是完整配置。账号没有默认值；Hub、OneBot API 和回调凭证的具体要求见 [README](../README.md#配置与启动) 与 [安全说明](../SECURITY.md)。免令牌面板仅允许本机回环访问，不解除 OneBot 回调鉴权。
+这些只是配套参数，不是完整配置。账号没有默认值；Hub、OneBot API 和回调凭证的具体要求见 [README](readme-reference.zh-CN.md#配置与启动) 与 [安全说明](../SECURITY.md)。免令牌面板仅允许本机回环访问，不解除 OneBot 回调鉴权。
 
 ## 6. 持久数据与文件清理
 

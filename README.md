@@ -2,74 +2,48 @@
 
 # WorkBuddy QQ Agent 网关
 
-将本机 WorkBuddy Agent 接入 QQ，在群聊与私聊中延续会话，并通过网页查看实时输出、配置权限、管理通知订阅与表情。
+让本机 WorkBuddy Agent 进入 QQ 的日常对话：接住群聊和私聊里的任务，把消息、文件与工具操作连起来，在网页里看见它正在做什么。
 
-[离线演示](#快速开始) · [完整功能与部署参考](docs/readme-reference.zh-CN.md) · [安全说明](SECURITY.md)
+![群聊控制台：待处理消息、上一条回复与实时生成内容](docs/screenshots/conversation.png)
 
-![群聊与实时输出，使用合成演示数据](docs/screenshots/conversation.png)
+## 对话可以继续，任务也有来处
 
-本项目围绕 WorkBuddy 设计，Codex 适配仅为兼容路径。代码基于 [Epic0522/Codex-Remote-Contact](https://github.com/Epic0522/Codex-Remote-Contact) 扩展，以脱敏快照和全新提交历史独立发布。上游未声明许可证，不能将公开源码视为完整的开源授权。
+每个群和私聊默认保留自己的持久会话，重启后继续。Agent 可以按当前对话读取消息、展开转发、查看图片，再发送文字、文件、图片和原生表情。需要时，也可明确让私聊关联某个群的上下文。
 
-## 功能特性
+## 看得见进展，也能随时控制
 
-- **持久会话**：群聊和私聊默认隔离；可明确关联私聊与群，共享模型上下文并串行处理。
-- **受控 QQ 工具**：读取与发送消息、引用、图片、文件和原生表情，按当前身份、目标与权限核验。
-- **实时控制台**：查看输出、队列与诊断，调整模型、推理、压缩和执行权限，支持立即终止。
-- **通知订阅**：只读来源逐目标汇总，全部订阅者成功处理后才释放来源消息。
-- **可选集成**：Home Assistant、Apple 日历/提醒、小爱播报与 QQ 空间自动化，各自有独立授权边界。
+在面板查看实时输出、待处理消息和队列，调整会话模型与执行权限。想暂停回复或中断当前任务时，直接在界面操作，不必把控制命令混进群消息。
 
-## 快速开始
+![会话设置：模型、推理、压缩与执行权限](docs/screenshots/settings.png)
 
-先体验不连接 QQ、也不调用模型的本地演示。需要 Node.js **20.6+**：
+## 重要通知，不必每个群都盯着
 
-```bash
-git clone https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway.git
-cd workbuddy-qq-agent-gateway
-npm run demo
-```
+为目标会话订阅只读通知来源，按等待窗口汇总，再分别发给需要的人。面板显示各订阅者的处理进度；通知仍有目标，不会变成无差别群发。
 
-打开 `http://127.0.0.1:3790/client.html`。演示使用真实前端和合成状态，拒绝修改请求，不读取真实网关、钥匙串和消息。README 截图也来自演示数据。
+![通知来源与订阅者的处理状态](docs/screenshots/subscriptions.png)
 
-真实部署需要 **macOS、Python 3.10+**、已登录的 WorkBuddy / CodeBuddy CLI，以及单独安装登录的 SnowLuma 或兼容 OneBot QQ 桥。模型调用使用自己的额度；普通 OneBot 未必具备全部扩展接口。容器文件发送与恢复还需 Docker、Colima 和已有 SnowLuma 容器。
+## 也保留聊天里的表情与习惯
 
-```bash
-bash modules/workbuddy-agent/setup.sh
-cp config/qq-only.env.example config/qq-only.env
-mkdir -p runtime/qq-only-data
-cp config/settings.example.json runtime/qq-only-data/settings.json
-```
+表情库可以检索、修改场景和整理黑名单。需要扩展时，还能按独立授权接入 Home Assistant、Apple 日历/提醒、小爱播报与 QQ 空间功能。
 
-随后按完整部署参考设置不同的管理员/机器人 QQ 号、令牌、回调与白名单，再启动。Node 服务没有生产 npm 依赖，Python SDK 版本固定在 [requirements.txt](modules/workbuddy-agent/requirements.txt)。不要将面板无保护地暴露到公网。
+![表情展示台：浏览和管理可用表情](docs/screenshots/stickers.png)
 
-## 使用说明
+*以上均为真实前端配合合成演示数据，不包含实际 QQ 聊天记录。*
 
-在面板添加允许的群聊或私聊，按会话设置工具访问范围。Agent 模式下，“只读”“工作区写入”和“完全访问”是不同执行权限；完全访问意味着可信成员可能经 Agent 操作整台电脑。日历/提醒写入与空间自动化默认关闭，空间发布仅限 OWNER 授权。
+## 先看演示，再接入自己的环境
 
-私聊共享群上下文会共享模型记忆和工作区，内容可能影响群内后续回答；解绑不会清除已经进入群上下文的内容，仅适用于相互信任的渠道。读取关联消息不继承另一渠道的权限。
+项目提供不登录 QQ、不调用模型的本地演示，适合先看看面板与交互。真实部署面向 macOS，使用自己的 WorkBuddy 与 QQ 桥。
 
-来源群、网页、图片文字、引用和转发均不能修改授权或发送目标。私人环境、runtime、消息、会话映射、真实身份和登录数据不入库。参见[共享上下文与权限参考](docs/readme-reference.zh-CN.md)及[本地可编辑结构](docs/LOCAL_CUSTOMIZATION.md)。
+[打开演示与部署指南](docs/GUIDE.zh-CN.md)
 
-## 开发与验证
+## 进一步了解
 
-```bash
-npm test
-bash modules/workbuddy-agent/setup.sh
-modules/workbuddy-agent/.venv/bin/python test/workbuddy-bridge-recovery.test.py
-modules/workbuddy-agent/.venv/bin/python test/workbuddy-image-preview.test.py
-npm run audit:public
-```
+| 想了解什么 | 去哪里看 |
+| --- | --- |
+| 本地演示、环境要求与部署 | [使用指南](docs/GUIDE.zh-CN.md) |
+| 会话、订阅、共享上下文和自动化 | [完整功能参考](docs/readme-reference.zh-CN.md) |
+| 权限、数据与安全 | [安全说明](SECURITY.md) |
+| 本地修改与家居集成 | [定制结构](docs/LOCAL_CUSTOMIZATION.md) · [Home Assistant](docs/HOME_ASSISTANT.md) |
+| 来源、许可与反馈 | [来源清单](docs/PROVENANCE.md) · [许可说明](LICENSE-NOTICE.md) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
 
-测试使用合成身份与临时目录，不连接真实 QQ 或发布内容。Linux CI 只验证可移植逻辑，不证明完整 Linux 部署；真实 QQ、Apple 应用和 CLI 集成需在自己的 macOS 环境验收。
-
-普通回复按连续 3 分钟无进展判断超时，压缩有独立的绝对 6 分钟上限。仅在可证明无潜在副作用、旧轮次已回收且审计可用时恢复一次；发送、写文件、控制家居或结果不明时不自动重放。QQ 接口变动、风控和上传能力取决于所用桥；未提供的空间接口不会伪造，已发送内容不能保证撤回。
-
-## 文档与支持
-
-- [完整功能、配置、权限与限制](docs/readme-reference.zh-CN.md)
-- [Home Assistant](docs/HOME_ASSISTANT.md) · [本地定制](docs/LOCAL_CUSTOMIZATION.md)
-- [来源清单](docs/PROVENANCE.md) · [许可说明](LICENSE-NOTICE.md)
-- [问题反馈](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
-
-## 许可与致谢
-
-感谢原作者 [Epic0522](https://github.com/Epic0522)。上游尚无许可证，本仓库不擅自声明整仓为 MIT/Apache。使用或分发前请阅读许可与来源说明并确认必要授权；第三方依赖和人格素材另有各自条款。
+基于 [Epic0522/Codex-Remote-Contact](https://github.com/Epic0522/Codex-Remote-Contact) 扩展，围绕 WorkBuddy 独立维护；上游许可未声明，使用与分发条件请先阅读许可说明。
