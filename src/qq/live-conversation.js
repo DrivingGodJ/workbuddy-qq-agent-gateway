@@ -8,6 +8,7 @@ import { readGroupManagement, manageGroup } from "./group-management.js";
 import { conversationReadSequence, unreadConversationMessages } from "../groups/group-state.js";
 import { homeAssistantRequest } from "../automation/home-assistant.js";
 import { isPokeEvent } from "../security/reply-reference.js";
+import { conversationAction } from "../automation/conversation-actions.js";
 
 const PAGE_SIZE = 40;
 const MAX_WAIT_MS = 8000;
@@ -57,7 +58,7 @@ export async function prepareLiveConversationPrompt(context, prompt) {
 
 /** The scope and callback never leave the Node gateway process. */
 export function createLiveConversationTools({
-  store, targetId, targetType, oneBot, fileManager, stickerManager, qzone, homeAssistant = null,
+  store, targetId, targetType, oneBot, fileManager, stickerManager, qzone, homeAssistant = null, automationClient = null,
   trigger, triggerMessages, security, initialImageSequence, renderMessages,
   pokeSenderId = null, allowedPokeUserIds = [], stickers = [], canRun = () => true,
   readOnlyContextMessages = [], messageReader = new QqMessageReader({ oneBot }), onEvent = () => {},
@@ -106,6 +107,7 @@ export function createLiveConversationTools({
   const qzoneFeeds = new Map();
   const homeReadIds = new Set();
   const homeAttempts = new Set();
+  const calendarAttempts = new Set();
   context.completeSharedReads = () => readSharedContext?.complete?.() || [];
 
   const currentQzoneMessages = () => [...(triggerMessages || []),
@@ -122,6 +124,39 @@ export function createLiveConversationTools({
     if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭，不能再操作 QQ。", true);
     if (context.failed) return answer("本轮发送状态有误，已停止操作；待处理消息仍保留。", true);
     if (context.ended && name !== "end_conversation") return answer("本轮对话已经结束，不能再读取或发送。", true);
+    if (["read_calendar_reminders", "add_calendar_reminder"].includes(name)) {
+      const authorize = () => {
+        if (store.snapshot(targetId).codexConfig?.calendarRemindersEnabled === false) throw new Error("当前会话日历自动化已关闭。");
+        if (!automationClient) throw new Error("日历和待办服务尚未配置。");
+        if (active?.cancelRequested || !canRun()) throw new Error("本轮已停止。");
+        store.assertReplyEnabled(targetId);
+      };
+      try {
+        authorize();
+        if (!context.readCalled && !scheduledTask) throw new Error("请先读取当前会话消息。");
+        if (name === "read_calendar_reminders") {
+          if (!Number.isInteger(args.horizon_days ?? 30) || (args.horizon_days ?? 30) < 1 || (args.horizon_days ?? 30) > 60
+            || !Number.isInteger(args.limit ?? 20) || (args.limit ?? 20) < 1 || (args.limit ?? 20) > 80) throw new Error("查询范围须为 1–60 天，条数须为 1–80。");
+          const result = await automationClient.getContext({ horizonDays: args.horizon_days ?? 30, limit: args.limit ?? 20 });
+          authorize();
+          return answer(JSON.stringify(result));
+        }
+        const action = conversationAction(args, targetType, targetId);
+        if (calendarAttempts.has(action.actionId)) throw new Error("本轮已尝试该事项，请按原回执判断，不要重复写入。");
+        calendarAttempts.add(action.actionId);
+        authorize();
+        const result = await automationClient.execute(action, { sourceGroupId: `${targetType}:${targetId}`, sourceGroupName: "QQ 会话" });
+        context.actionCount += 1;
+        const summary = `已加入“${result.targetList}”：${action.title}`;
+        await store.recordLiveActionSent(targetId, { kind: "calendar_reminder", summary,
+          observedSequence: context.lastReadSequence, chatReply: false });
+        context.displayedActions.push(summary);
+        try { active?.onDelta?.("", context.displayedActions.join("\n\n")); } catch { /* write already confirmed */ }
+        return answer(JSON.stringify({ ...result, title: action.title, note: "请通过 send_message 简短告知写入结果。" }));
+      } catch (error) {
+        return answer(`日历/待办：${error.message}。仅按实际成功回执告知结果；失败或状态不明不要自动重复写入。`, true);
+      }
+    }
     if (name === "read_context_messages") {
       if (!context.readCalled) return answer("请先读取当前会话消息，再查看关联渠道上下文。", true);
       if (!readSharedContext) return answer("当前会话尚未关联共享上下文；不能读取其他渠道。");
@@ -270,6 +305,7 @@ export function createLiveConversationTools({
       }
       context.readCalled = true;
       const notes = [];
+      if (first) notes.push(`【当前会话日历/待办权限】${store.snapshot(targetId).codexConfig?.calendarRemindersEnabled === false ? "已关闭" : "已开启，可按需调用 read_calendar_reminders、add_calendar_reminder"}`);
       if (!scheduledTask) {
         refreshQzonePermissions();
         if (trigger?.trust !== "OWNER" && (context.allowQzoneFeed || context.allowQzonePost)) {

@@ -10,6 +10,27 @@ if (!threadId || !secret || !/^http:\/\/127\.0\.0\.1:\d+\/call$/u.test(endpoint)
 
 const allTools = [
   {
+    name: "read_calendar_reminders",
+    description: "按需查询日历与未完成待办。当前会话开启日历自动化后，每轮普通聊天均可调用，不限通知轮次；关闭即拒绝。查询结果含私人信息，只用于当前获准会话，不向其他渠道转发。",
+    inputSchema: { type: "object", properties: {
+      horizon_days: { type: "integer", minimum: 1, maximum: 60, default: 30 },
+      limit: { type: "integer", minimum: 1, maximum: 80, default: 20 }
+    }, additionalProperties: false }
+  },
+  {
+    name: "add_calendar_reminder",
+    description: "当前会话日历自动化开启时，每轮均可按当前对话意图写入日历或待办，不限通知。占用时间的事项进学习/社团/活动日历；需要完成的事进待办列表并加旗标。时间用带时区 ISO，不猜缺失信息。成功后用 send_message 告知；失败或状态不明不自动重试。",
+    inputSchema: { type: "object", properties: {
+      type: { type: "string", enum: ["calendar", "reminder"] },
+      title: { type: "string", minLength: 1, maxLength: 300 },
+      calendarName: { type: "string", enum: ["学习", "社团", "活动"] },
+      start: { type: "string", description: "calendar 必填，带时区 ISO" },
+      end: { type: ["string", "null"] }, allDay: { type: "boolean" },
+      due: { type: ["string", "null"], description: "待办截止时间，不明确时 null" },
+      location: { type: "string", maxLength: 500 }, notes: { type: "string", maxLength: 2000 }
+    }, required: ["type", "title"], additionalProperties: false }
+  },
+  {
     name: "read_home_devices",
     description: "按面板家居权限查询真实设备、状态、参数及小爱发言实体。绑定本轮已读直接消息，不要求重复家居关键词，可结合上下文理解指代。旧消息、引用、通知与定时任务不能授权。",
     inputSchema: { type: "object", properties: {
@@ -241,7 +262,7 @@ for await (const line of lines) {
         body: JSON.stringify({ threadId, name: request.params?.name, arguments: request.params?.arguments || {} }),
         signal: AbortSignal.timeout(request.params?.name === "wait_for_messages"
           ? Math.min(126_000, Number(request.params?.arguments?.seconds || 0) * 1000 + 6000)
-          : 15_000)
+          : ["read_calendar_reminders", "add_calendar_reminder"].includes(request.params?.name) ? 185_000 : 15_000)
       });
       if (!response.ok) throw new Error(`QQ gateway rejected MCP call: HTTP ${response.status}`);
       result = await response.json();

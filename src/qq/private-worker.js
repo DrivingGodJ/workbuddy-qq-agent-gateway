@@ -357,7 +357,7 @@ export class PrivateWorker {
     const security = constrainConversationSecurity(privateSandbox(userId, trigger), optionsForConversation(conversation));
     return createLiveConversationTools({
       store: this.store, targetId: userId, targetType: "private", oneBot: this.oneBot,
-      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone, automationClient: this.automationClient,
       trigger, triggerMessages: [], security, scheduledTask: true, qzoneActions,
       initialImageSequence: Number(conversation.pendingMessages.at(-1)?.sequence || 0),
       stickers: this.stickerManager?.promptCatalog() || [],
@@ -483,7 +483,7 @@ export class PrivateWorker {
         messageReader: new QqMessageReader({ oneBot: this.oneBot })
       } : useMcpRead ? createLiveConversationTools({
         store: this.store, targetId: userId, targetType: "private", oneBot: this.oneBot,
-        fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+        fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone, automationClient: this.automationClient,
         homeAssistant: this.homeAssistant,
         readSharedContext: this.readSharedContextFor?.("private", userId),
         canRun: () => this.canRun(userId),

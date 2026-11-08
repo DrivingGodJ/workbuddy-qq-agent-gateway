@@ -312,7 +312,7 @@ export class GroupWorker {
     );
     return createLiveConversationTools({
       store: this.store, targetId: groupId, targetType: "group", oneBot: this.oneBot,
-      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone, automationClient: this.automationClient,
       trigger, triggerMessages: [], security, scheduledTask: true, qzoneActions,
       initialImageSequence: Number(group.pendingMessages.at(-1)?.sequence || 0),
       stickers: this.stickerManager?.promptCatalog() || [],
@@ -565,7 +565,7 @@ export class GroupWorker {
       messageReader: new QqMessageReader({ oneBot: this.oneBot })
     } : useMcpRead ? createLiveConversationTools({
       store: this.store, targetId: groupId, targetType: "group", oneBot: this.oneBot,
-      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone,
+      fileManager: this.fileManager, stickerManager: this.stickerManager, qzone: this.qzone, automationClient: this.automationClient,
       homeAssistant: this.homeAssistant,
       readSharedContext: this.readSharedContextFor?.("group", groupId),
       onEvent: this.onEvent,

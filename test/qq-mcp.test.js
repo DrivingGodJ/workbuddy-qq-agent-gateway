@@ -49,8 +49,8 @@ test("normal QQ MCP advertises the same complete fixed catalog for every convers
   };
   const groupTools = list("group-thread");
   assert.deepEqual(groupTools, list("private-thread"));
-  assert.equal(groupTools.length, 23);
-  for (const name of ["send_context_message", "send_file", "send_image", "recall_message", "post_qzone", "read_qzone_feeds", "engage_qzone_feed", "get_group_management", "manage_group"]) {
+  assert.equal(groupTools.length, 25);
+  for (const name of ["read_calendar_reminders", "add_calendar_reminder", "send_context_message", "send_file", "send_image", "recall_message", "post_qzone", "read_qzone_feeds", "engage_qzone_feed", "get_group_management", "manage_group"]) {
     assert.ok(groupTools.some((tool) => tool.name === name));
   }
   for (const name of ["propose_qzone_post", "skip_qzone_post", "read_qzone_feed_batch", "submit_qzone_decisions"]) {

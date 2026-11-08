@@ -29,7 +29,7 @@ Then follow the detailed deployment reference to configure distinct owner/bot QQ
 
 ## Usage
 
-Add allowed groups or private contacts in the console and configure each session. In Agent mode, read-only, workspace write and full access are different execution permissions. Full access can let trusted members operate the whole computer through the Agent. Calendar/Reminder writes and Qzone automation default to off; Qzone publishing is restricted to OWNER authorization.
+Add allowed groups or private contacts in the console and configure each session. In Agent mode, read-only, workspace write and full access are different execution permissions. Full access can let trusted members operate the whole computer through the Agent. Calendar/Reminder access and Qzone automation default to off; enabling Calendar/Reminders grants querying and adding items on every ordinary chat turn, not only notification turns. Each tool call checks the current session switch. Qzone publishing is restricted to OWNER authorization.
 
 Linking a private chat to a group shares model memory and workspace, so private content may influence later group answers. Unlinking does not erase content already in the group thread. Use only among mutually trusted channels. Reading linked messages does not inherit another channel's permissions.
 
