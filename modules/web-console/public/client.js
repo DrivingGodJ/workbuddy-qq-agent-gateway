@@ -13,7 +13,7 @@ const els = Object.fromEntries([
   "agentSettingsDetails", "agentSettingsSummary", "agentSettingsForm", "agentModel", "agentReasoningEffort",
   "contextLinkForm", "contextLinkGroup", "contextLinkHint", "contextLinkStatus", "saveContextLinkButton", "sharedContextInfo",
   "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentModeExplanation",
-  "agentSpeakerMorning", "agentSpeakerNoon", "agentSpeakerNight", "speakerGreetingsHint",
+  "speakerGreetingSettings", "speakerGreetingRows", "addSpeakerGreetingButton", "speakerGreetingsHint",
   "agentSettingsHint", "agentSettingsStatus", "saveAgentSettingsButton",
   "personaDetails", "personaSummary", "personaPromptPreview",
   "personaNameForm", "personaNameInput", "personaNameStatus", "savePersonaNameButton",
@@ -474,12 +474,12 @@ function renderAgentSettings(item) {
     permissionMode: "workspaceWrite",
     calendarRemindersEnabled: true,
     homeAssistantPermission: "owner",
-    speakerGreetings: { morning: false, noon: false, night: false }
+    speakerGreetings: []
   };
   const modelConfig = data.contextLink ? data.effectiveCodexConfig || config : config;
   const model = modelInfo(modelConfig.model);
   els.agentSettingsSummary.textContent = `${data.contextLink ? "共享群 · " : ""}${permissionModeLabel(config.permissionMode)} · ${model?.displayName || modelConfig.model || "默认"} · ${effortLabel(modelConfig.reasoningEffort)} · 自动化${config.calendarRemindersEnabled === false ? "关" : "开"}`;
-  const nextSignature = JSON.stringify([item.key, config, modelConfig, data.contextLink, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions, state?.ai?.speakerGreetingsAvailable]);
+  const nextSignature = JSON.stringify([item.key, config, modelConfig, data.contextLink, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions]);
   const nextContextKey = `${item.key}:${data.contextLink?.groupId || ""}`;
   if ((!settingsDirty || settingsContextKey !== nextContextKey) && settingsSignature !== nextSignature) {
     populateModelOptions(modelConfig.model);
@@ -491,9 +491,8 @@ function renderAgentSettings(item) {
     populatePermissionOptions(config.permissionMode, item.kind);
     els.agentCalendarRemindersEnabled.checked = config.calendarRemindersEnabled !== false;
     populateHomeAssistantPermissionOptions(config.homeAssistantPermission || "owner", item.kind);
-    els.agentSpeakerMorning.checked = config.speakerGreetings?.morning === true;
-    els.agentSpeakerNoon.checked = config.speakerGreetings?.noon === true;
-    els.agentSpeakerNight.checked = config.speakerGreetings?.night === true;
+    els.speakerGreetingRows.replaceChildren();
+    for (const plan of config.speakerGreetings || []) appendSpeakerGreetingRow(plan);
     settingsSignature = nextSignature;
   }
   updateParameterExplanation(item);
@@ -504,13 +503,14 @@ function renderAgentSettings(item) {
   els.agentHomeAssistantPermission.disabled = busy;
   const greetingAvailable = state?.ai?.speakerGreetingsAvailable === true;
   const homeEnabled = els.agentHomeAssistantPermission.value !== "disabled";
-  for (const control of [els.agentSpeakerMorning, els.agentSpeakerNoon, els.agentSpeakerNight]) {
-    control.disabled = busy || (!greetingAvailable || !homeEnabled) && !control.checked;
+  els.speakerGreetingSettings.disabled = busy;
+  for (const toggle of els.speakerGreetingRows.querySelectorAll(".greeting-enabled")) {
+    toggle.disabled = (!greetingAvailable || !homeEnabled) && !toggle.checked;
   }
   els.speakerGreetingsHint.textContent = !greetingAvailable
-    ? "尚未配置可用的小爱发言实体或 HA 凭证，不能开启问候；已开的可关掉。"
-    : !homeEnabled ? "请先开启智能家居与小爱发言权限；家居权限关闭时，已配置的问候暂停。"
-    : "北京时间，三个开关独立生效，默认关闭。只由小爱播报，不向 QQ 自动发消息；总开关或允许回复关闭时暂停。";
+    ? "小爱发言尚未配置，可以先保存停用的播报计划。"
+    : !homeEnabled ? "开启智能家居与小爱发言权限后，计划才会播报。"
+    : `按北京时间播报。天气${state?.ai?.speakerWeatherCity ? `使用${state.ai.speakerWeatherCity}当天预报` : "地点尚未配置"}。修改后请保存会话参数。`;
   els.saveAgentSettingsButton.disabled = busy || !settingsDirty;
   els.agentSettingsHint.textContent = busy
     ? "会话运行中暂不能修改权限；请先立即终止，或等待本轮结束。未保存的选择会保留。"
@@ -518,6 +518,38 @@ function renderAgentSettings(item) {
     : item.kind === "group" && els.agentPermissionMode.value === "dangerFullAccess"
         ? `家居权限保存后立即生效；其他参数下轮生效。当前群的所有成员都能通过${agentName()}操作本机和发送本机文件。`
         : "家居权限保存后立即生效；其他参数从下一轮起生效，历史 thread 不变。";
+}
+
+const greetingWeekdays = [[1, "一"], [2, "二"], [3, "三"], [4, "四"], [5, "五"], [6, "六"], [0, "日"]];
+
+function appendSpeakerGreetingRow(plan) {
+  const row = document.createElement("div");
+  row.className = "speaker-greeting-row";
+  row.dataset.planId = plan.id;
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", `${plan.time || "新建"}播报计划`);
+  row.innerHTML = `
+    <div class="speaker-greeting-row-header">
+      <label>播报时间 <input class="greeting-time" type="time" value="${escapeHtml(plan.time)}" required /></label>
+      <button type="button" class="button greeting-remove" aria-label="删除这条播报">删除</button>
+    </div>
+    <div class="greeting-days" role="group" aria-label="播报星期">
+      ${greetingWeekdays.map(([day, name]) => `<label><input type="checkbox" value="${day}" aria-label="星期${name}" ${plan.days.includes(day) ? "checked" : ""} /><span>${name}</span></label>`).join("")}
+    </div>
+    <label class="settings-switch"><strong>启用计划</strong><input class="greeting-enabled" type="checkbox" role="switch" ${plan.enabled ? "checked" : ""} /></label>
+    <label class="settings-switch"><strong>播报天气和穿衣建议</strong><input class="greeting-weather" type="checkbox" role="switch" ${plan.weather ? "checked" : ""} /></label>`;
+  els.speakerGreetingRows.append(row);
+  return row;
+}
+
+function speakerGreetingDraft() {
+  return [...els.speakerGreetingRows.children].map((row) => ({
+    id: row.dataset.planId,
+    time: row.querySelector(".greeting-time").value,
+    days: [...row.querySelectorAll(".greeting-days input:checked")].map((day) => Number(day.value)),
+    enabled: row.querySelector(".greeting-enabled").checked,
+    weather: row.querySelector(".greeting-weather").checked
+  }));
 }
 
 function renderContextLink(item) {
@@ -1260,7 +1292,25 @@ els.agentReasoningEffort.addEventListener("change", markSettingsDirty);
 els.agentContextTokenLimit.addEventListener("change", markSettingsDirty);
 els.agentPermissionMode.addEventListener("change", markSettingsDirty);
 els.agentHomeAssistantPermission.addEventListener("change", markSettingsDirty);
-for (const control of [els.agentSpeakerMorning, els.agentSpeakerNoon, els.agentSpeakerNight]) control.addEventListener("change", markSettingsDirty);
+els.speakerGreetingRows.addEventListener("change", markSettingsDirty);
+els.speakerGreetingRows.addEventListener("click", (event) => {
+  const button = event.target.closest(".greeting-remove");
+  if (!button) return;
+  const row = button.closest(".speaker-greeting-row");
+  const next = row.nextElementSibling || row.previousElementSibling;
+  row.remove();
+  markSettingsDirty();
+  (next?.querySelector(".greeting-time") || els.addSpeakerGreetingButton).focus();
+});
+els.addSpeakerGreetingButton.addEventListener("click", () => {
+  const row = appendSpeakerGreetingRow({
+    id: crypto.randomUUID(), time: "", days: [0, 1, 2, 3, 4, 5, 6],
+    enabled: state?.ai?.speakerGreetingsAvailable === true && els.agentHomeAssistantPermission.value !== "disabled",
+    weather: false
+  });
+  markSettingsDirty();
+  row.querySelector(".greeting-time").focus();
+});
 els.agentCalendarRemindersEnabled.addEventListener("change", () => {
   updateParameterExplanation(currentTarget());
   markSettingsDirty();
@@ -1317,6 +1367,14 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const item = currentTarget();
   if (!item || settingsSavingKey || contextLinkDrafts.get(item.key)?.saving || item.data.busy || item.data.activeReply?.running || isSpeakerGreetingBusy(item.data)) return;
+  const speakerGreetings = speakerGreetingDraft();
+  const missingDays = speakerGreetings.findIndex((plan) => !plan.days.length);
+  if (missingDays !== -1) {
+    els.agentSettingsStatus.textContent = "每条播报至少要选择一个星期。";
+    els.agentSettingsStatus.className = "form-status error";
+    els.speakerGreetingRows.children[missingDays].querySelector(".greeting-days input").focus();
+    return;
+  }
   const enablingGroupFullAccess = item.kind === "group"
     && els.agentPermissionMode.value === "dangerFullAccess"
     && item.data.codexConfig?.permissionMode !== "dangerFullAccess";
@@ -1343,7 +1401,7 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
         permissionMode: els.agentPermissionMode.value,
         calendarRemindersEnabled: els.agentCalendarRemindersEnabled.checked,
         homeAssistantPermission: els.agentHomeAssistantPermission.value,
-        speakerGreetings: { morning: els.agentSpeakerMorning.checked, noon: els.agentSpeakerNoon.checked, night: els.agentSpeakerNight.checked }
+        speakerGreetings
       })
     });
     item.data.codexConfig = response.codexConfig;

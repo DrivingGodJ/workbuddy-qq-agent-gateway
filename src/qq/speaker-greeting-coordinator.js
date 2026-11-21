@@ -1,8 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { normalizeSpeakerGreetings, SPEAKER_GREETING_ID, SPEAKER_GREETING_TIME } from "./speaker-greeting-settings.js";
+import { speakerWeatherText } from "./speaker-greeting-weather.js";
 
-export const SPEAKER_GREETING_SLOTS = Object.freeze({ morning: "07:00", noon: "13:00", night: "23:30" });
-const LABELS = { morning: "早间问候", noon: "午间问候", night: "晚间问候" };
 const OPEN_STAGES = new Set(["queued", "generating", "speaking"]);
 const STAGES = new Set([...OPEN_STAGES, "completed", "failed", "cancelled", "uncertain"]);
 const TARGET_ID = /^\d{5,14}$/u;
@@ -13,8 +13,8 @@ function shanghaiParts(date) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
 
-function setting(config, slot) {
-  return { enabled: config?.speakerGreetings?.[slot] === true, time: SPEAKER_GREETING_SLOTS[slot] };
+function weekday(date) {
+  return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
 
 function answer(value, isError = false) {
@@ -28,9 +28,12 @@ function cancelled(message = "问候开关、家居权限或会话状态已变�
 }
 
 export class SpeakerGreetingCoordinator {
-  constructor({ filePath, homeAssistant, listTargets = () => [], canRun = () => true, clock = () => new Date(), onEvent = () => {}, onActivityChange = () => {} } = {}) {
+  constructor({ filePath, homeAssistant, weatherLocation = null, weatherText = speakerWeatherText,
+    listTargets = () => [], canRun = () => true, clock = () => new Date(), onEvent = () => {}, onActivityChange = () => {} } = {}) {
     this.filePath = filePath;
     this.homeAssistant = homeAssistant;
+    this.weatherLocation = weatherLocation;
+    this.weatherText = weatherText;
     this.listTargets = listTargets;
     this.canRun = canRun;
     this.clock = clock;
@@ -49,9 +52,11 @@ export class SpeakerGreetingCoordinator {
       const saved = JSON.parse(await readFile(this.filePath, "utf8"));
       if (saved.version !== 1 || !saved.jobs || Array.isArray(saved.jobs) || typeof saved.jobs !== "object") throw new Error("小爱定时问候记录格式无效；为避免重复播报，不能清空后继续。");
       for (const [id, job] of Object.entries(saved.jobs)) {
-        if (!["group", "private"].includes(job.type) || !TARGET_ID.test(String(job.targetId)) || !Object.hasOwn(SPEAKER_GREETING_SLOTS, job.slot)
-          || !/^\d{4}-\d{2}-\d{2}$/u.test(String(job.date)) || id !== job.id || id !== `${job.type}:${job.targetId}:${job.date}:${job.slot}`
-          || job.time !== SPEAKER_GREETING_SLOTS[job.slot] || !STAGES.has(job.stage) || typeof job.attempted !== "boolean"
+        const planKey = `${job.type}:${job.targetId}:${job.date}:${job.slot}`;
+        if (!["group", "private"].includes(job.type) || !TARGET_ID.test(String(job.targetId)) || !SPEAKER_GREETING_ID.test(job.slot)
+          || !/^\d{4}-\d{2}-\d{2}$/u.test(String(job.date)) || id !== job.id
+          || ![planKey, `${planKey}:${job.time}`].includes(id) || !SPEAKER_GREETING_TIME.test(job.time)
+          || !STAGES.has(job.stage) || typeof job.attempted !== "boolean"
           || !Number.isFinite(Date.parse(job.scheduledAt))) throw new Error("小爱定时问候记录身份无效；停止恢复以避免重复播报。");
         if (OPEN_STAGES.has(job.stage)) {
           job.stage = job.attempted ? "uncertain" : "queued";
@@ -75,13 +80,13 @@ export class SpeakerGreetingCoordinator {
     return this.targets().find((target) => target.type === job.type && String(target.id) === job.targetId);
   }
 
-  enabled(target, slot, time = null) {
-    if (!this.canRun() || !target || this.homeAssistant?.enabled === false || !this.homeAssistant?.allowedSpeakers?.size) return false;
+  enabledPlan(target, { date, slot, time }) {
+    if (!this.canRun() || !target || this.homeAssistant?.enabled === false || !this.homeAssistant?.allowedSpeakers?.size) return null;
     const snapshot = target.store.snapshot(target.id);
     const config = snapshot.codexConfig;
-    const selected = setting(config, slot);
-    return snapshot.replyEnabled !== false && ["owner", "group"].includes(config?.homeAssistantPermission)
-      && selected.enabled && (!time || selected.time === time);
+    if (snapshot.replyEnabled === false || !["owner", "group"].includes(config?.homeAssistantPermission)) return null;
+    return normalizeSpeakerGreetings(config.speakerGreetings).find((plan) =>
+      plan.id === slot && plan.enabled && plan.time === time && plan.days.includes(weekday(date))) || null;
   }
 
   start() {
@@ -105,7 +110,7 @@ export class SpeakerGreetingCoordinator {
   async schedule() {
     for (const job of Object.values(this.jobs).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))) {
       if (job.stage !== "queued" || this.running.has(job.id)) continue;
-      if (this.enabled(this.targetFor(job), job.slot, job.time)) this.launch(job);
+      if (this.enabledPlan(this.targetFor(job), job)) this.launch(job);
       else {
         await this.update(() => { job.stage = "cancelled"; job.error = "恢复前相关开关或权限已关闭，问候不会补播。"; job.completedAt = this.clock().toISOString(); });
         this.notify(job);
@@ -115,12 +120,13 @@ export class SpeakerGreetingCoordinator {
     const parts = shanghaiParts(this.clock());
     for (const target of this.targets()) {
       if (!["group", "private"].includes(target.type) || !TARGET_ID.test(String(target.id))) continue;
-      for (const slot of Object.keys(SPEAKER_GREETING_SLOTS)) {
-        const config = setting(target.store.snapshot(target.id).codexConfig, slot);
-        const id = `${target.type}:${target.id}:${parts.date}:${slot}`;
-        if (config.time !== parts.time || this.jobs[id] || !this.enabled(target, slot)) continue;
-        const job = { id, type: target.type, targetId: String(target.id), date: parts.date, slot, time: config.time,
+      for (const plan of normalizeSpeakerGreetings(target.store.snapshot(target.id).codexConfig?.speakerGreetings)) {
+        const planKey = `${target.type}:${target.id}:${parts.date}:${plan.id}`;
+        const id = `${planKey}:${plan.time}`;
+        if (plan.time !== parts.time || this.jobs[id] || this.jobs[planKey]?.time === plan.time) continue;
+        const job = { id, type: target.type, targetId: String(target.id), date: parts.date, slot: plan.id, time: plan.time,
           scheduledAt: this.clock().toISOString(), stage: "queued", attempted: false, text: "", error: null };
+        if (!this.enabledPlan(target, job)) continue;
         await this.update(() => { this.jobs[id] = job; });
         this.notify(job);
         this.launch(job);
@@ -137,11 +143,13 @@ export class SpeakerGreetingCoordinator {
   }
 
   assertActive(job, active, modelActive = null) {
-    if (active.cancelRequested || modelActive?.cancelRequested || !OPEN_STAGES.has(job.stage)
-      || !this.enabled(this.targetFor(job), job.slot, job.time)) throw cancelled();
+    if (active.cancelRequested || modelActive?.cancelRequested || !OPEN_STAGES.has(job.stage)) throw cancelled();
+    const plan = this.enabledPlan(this.targetFor(job), job);
+    if (!plan) throw cancelled();
+    return plan;
   }
 
-  contextFor(job, active) {
+  contextFor(job, active, weather) {
     const speakerId = this.homeAssistant.allowedSpeakers.values().next().value;
     const context = { liveMode: true, requireRead: false, scheduledSpeakerGreeting: true, greetingJobId: job.id, targetType: job.type,
       allowMessage: false, ended: false, failed: false, spoken: false, readCalled: false, error: null };
@@ -162,15 +170,16 @@ export class SpeakerGreetingCoordinator {
         }
         if (!context.readCalled) throw new Error("请先调用 read_home_devices 核实指定的小爱发言入口。");
         if (job.attempted || context.spoken) throw new Error("本次问候已尝试播报；不得重复播报。");
-        if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 500) throw new Error("问候文本须为 1–500 字。");
-        const result = await this.homeAssistant.speak({ entity_id: speakerId, text: args.text }, { beforeSend: async () => {
+        const text = [typeof args.text === "string" ? args.text.trim() : "", weather].filter(Boolean).join(" ");
+        if (typeof args.text !== "string" || !args.text.trim() || text.length > 500) throw new Error("问候和天气合计须为 1–500 字。");
+        const result = await this.homeAssistant.speak({ entity_id: speakerId, text }, { beforeSend: async () => {
           this.assertActive(job, active, modelActive);
           await this.update(() => {
             if (job.attempted) throw new Error("本次问候已经尝试播报，不能重复。");
             job.attempted = true;
             job.attemptedAt = this.clock().toISOString();
             job.stage = "speaking";
-            job.text = args.text.trim();
+            job.text = text;
           });
           this.notify(job);
           this.assertActive(job, active, modelActive);
@@ -194,11 +203,13 @@ export class SpeakerGreetingCoordinator {
     try {
       if (typeof target?.worker?.runQzoneSequence !== "function") throw new Error("会话 worker 未提供持久队列，不能执行小爱定时问候。");
       await target.worker.runQzoneSequence(target.id, async (runTurn) => {
-        this.assertActive(job, active);
+        const plan = this.assertActive(job, active);
         await this.update(() => { job.stage = "generating"; });
         this.notify(job);
-        context = this.contextFor(job, active);
-        const prompt = `小爱${LABELS[job.slot]}。上海时间 ${job.date} ${job.time}。按当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。先直接调用 mcp__qq_gateway__read_home_devices 核实发言入口，再直接调用 mcp__qq_gateway__speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
+        const weather = plan.weather ? await this.weatherText(this.weatherLocation, shanghaiParts(this.clock()).date) : "";
+        this.assertActive(job, active);
+        context = this.contextFor(job, active, weather);
+        const prompt = `小爱定时播报。北京时间 ${job.date} ${job.time}。按时段和当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。${plan.weather ? "天气由网关附在问候之后，请勿自行提及天气。" : "本次只说问候。"}先直接调用 mcp__qq_gateway__read_home_devices 核实发言入口，再直接调用 mcp__qq_gateway__speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
         const result = await runTurn(prompt, { trigger: "speaker-greeting", qqToolContext: context });
         if (context.error) throw context.error;
         if (active.cancelRequested || result?.cancelled || result?.status === "cancelled") throw cancelled();
@@ -236,7 +247,7 @@ export class SpeakerGreetingCoordinator {
     const jobs = Object.values(this.jobs).filter((job) => job.type === type && job.targetId === String(id));
     const job = jobs.filter((item) => OPEN_STAGES.has(item.stage)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))[0]
       || jobs.sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt))[0];
-    return job ? { jobId: job.id, stage: job.stage, label: LABELS[job.slot], time: job.time,
+    return job ? { jobId: job.id, stage: job.stage, label: "定时播报", time: job.time,
       scheduledAt: job.scheduledAt, text: job.text, error: job.error } : null;
   }
 

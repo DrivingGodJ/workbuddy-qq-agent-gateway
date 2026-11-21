@@ -376,6 +376,7 @@ export function createLiveConversationTools({
           : await qzone.engageManualFeed({ targetType, targetId, messages: currentQzoneMessages(),
             trigger, feed, type: args.type, content: args.content });
         if (result.status === "unavailable") return answer("这条动态已删除或无法访问，网关已记下，不会再对它重复点赞或评论。");
+        if (result.status === "rejected") return answer("QQ 空间拒绝了这条评论（-10004 参数错误），网关已记录失败。可以继续处理其他动态，请勿重试这条评论。", true);
         if (result.status !== "done") return answer(`这条动态的同类操作此前已尝试（${result.priorStatus}），本轮不重复发送；请在 QQ 空间核对。`);
         const summary = `[QQ 空间${result.action === "like" ? "已点赞" : "已评论"}：${result.uin}/${result.tid}]`;
         if (!scheduledTask) await store.recordLiveActionSent(targetId, { kind: "qzone_engagement", summary,

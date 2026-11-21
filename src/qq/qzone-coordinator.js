@@ -220,6 +220,11 @@ export class QzoneCoordinator {
         return { status: "unavailable", action: action.type, uin: action.uin, tid: action.tid };
       }
       await this.store.finishAction(key, { status: "failed", message: `互动失败或状态不确定：${error.message}` });
+      // SnowLuma surfaced an explicit parameter rejection from QQ Space.
+      // Keep the attempt receipt, but let the scan continue with other feeds.
+      if (action.type === "comment" && /^qzone comment failed:\s*code=-10004\s+参数错误\s*$/iu.test(error.message)) {
+        return { status: "rejected", action: action.type };
+      }
       throw error;
     }
   }
@@ -414,6 +419,7 @@ export class QzoneCoordinator {
             if (sent.status === "unavailable") unavailableFeeds.add(`${action.uin}:${action.tid}`);
             if (sent.status === "done" && action.type === "like") likes += 1;
             if (sent.status === "done" && action.type === "comment") comments += 1;
+            if (sent.status === "rejected") failedActions += 1;
           } catch (error) {
             failedActions += 1;
           }
@@ -494,6 +500,7 @@ export class QzoneCoordinator {
           const result = await this.engageScheduledFeed(target, action);
           if (result.status === "done" && result.action === "like") context.likes += 1;
           if (result.status === "done" && result.action === "comment") context.comments += 1;
+          if (result.status === "rejected") context.failedActions += 1;
           if (result.status === "unavailable") context.unavailableFeeds.add(`${result.uin}:${result.tid}`);
           return result;
         },

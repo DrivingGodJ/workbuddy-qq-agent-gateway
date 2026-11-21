@@ -14,7 +14,7 @@ const msg = (id, name, text, extra = {}) => ({
 });
 const config = { model: "hy4-preview", reasoningEffort: "low", contextTokenLimit: 200000,
   workingMode: "agent", permissionMode: "workspaceWrite", calendarRemindersEnabled: false, homeAssistantPermission: "owner",
-  speakerGreetings: { morning: false, noon: false, night: false } };
+  speakerGreetings: [] };
 const sub = (targetId) => ({ id: "demo-sub-" + targetId, targetType: "group", targetId,
   sourceGroupId: "300000001", sourceGroupName: "课程通知（演示）", mode: "AUTO",
   intakeMode: "ADMIN_ONLY", collectionDelayMinutes: 10, enabled: true,

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { SessionStore } from "../src/storage/session-store.js";
+import { normalizeSpeakerGreetings } from "../src/qq/speaker-greeting-settings.js";
 import { conversationStatus, isSpeakerGreetingBusy, speakerGreetingStatus } from "../modules/web-console/public/client-status.js";
 
 async function configValidator(speakerGreetingsAvailable = true) {
@@ -19,6 +20,7 @@ async function configValidator(speakerGreetingsAvailable = true) {
     contextTokenOptions: [{ value: 100000 }],
     permissionModeOptions: [{ value: "workspaceWrite", targetTypes: ["group", "private"] }],
     speakerGreetingsAvailable,
+    normalizeSpeakerGreetings,
     HttpError: class extends Error { constructor(status, message) { super(message); this.status = status; } }
   });
 }
@@ -62,13 +64,13 @@ test("speaker greetings are off by default, persist independently and malformed 
   const filePath = join(directory, "sessions.json");
   const first = new SessionStore({ filePath });
   await first.init({ allowedGroups: ["100000001", "100000002", "100000003"] });
-  const off = { morning: false, noon: false, night: false };
+  const off = [];
   assert.deepEqual(first.snapshot("100000001").codexConfig.speakerGreetings, off);
   await first.setCodexConfig("100000001", { speakerGreetings: { morning: true, noon: false, night: true } });
   await first.setCodexConfig("100000003", { speakerGreetings: { morning: true, noon: "true", night: false } });
   const restored = new SessionStore({ filePath });
   await restored.init();
-  assert.deepEqual(restored.snapshot("100000001").codexConfig.speakerGreetings, { morning: true, noon: false, night: true });
+  assert.deepEqual(restored.snapshot("100000001").codexConfig.speakerGreetings.map(({id, time}) => [id, time]), [["morning", "07:00"], ["night", "23:30"]]);
   assert.deepEqual(restored.snapshot("100000002").codexConfig.speakerGreetings, off);
   assert.deepEqual(restored.snapshot("100000003").codexConfig.speakerGreetings, off);
   for (const raw of [null, true, [], {}, { morning: true }, { morning: true, noon: false, night: false, extra: false }]) {
@@ -77,20 +79,21 @@ test("speaker greetings are off by default, persist independently and malformed 
   }
 });
 
-test("speaker greeting API validation preserves old clients and checks prerequisites only when enabling a new slot", async () => {
+test("speaker plan API validates schedules and checks prerequisites when enabling a plan", async () => {
   const validate = await configValidator();
   const offline = await configValidator(false);
   const config = { model: "test-model", reasoningEffort: "low", contextTokenLimit: 100000,
     permissionMode: "workspaceWrite", calendarRemindersEnabled: false, homeAssistantPermission: "owner" };
-  const schedule = { morning: true, noon: false, night: false };
-  assert.deepEqual({ ...validate(config).speakerGreetings }, { morning: false, noon: false, night: false });
-  assert.deepEqual({ ...validate(config, { currentConfig: { speakerGreetings: schedule } }).speakerGreetings }, schedule);
-  assert.deepEqual({ ...offline(config, { currentConfig: { speakerGreetings: schedule } }).speakerGreetings }, schedule);
-  assert.deepEqual({ ...validate({ ...config, speakerGreetings: schedule }).speakerGreetings }, schedule);
+  const schedule = [{ id: "test-plan", time: "07:15", days: [1, 3], enabled: true, weather: true }];
+  assert.deepEqual(validate(config).speakerGreetings, []);
+  assert.deepEqual(validate(config, { currentConfig: { speakerGreetings: schedule } }).speakerGreetings, schedule);
+  assert.deepEqual(offline(config, { currentConfig: { speakerGreetings: schedule } }).speakerGreetings, schedule);
+  assert.deepEqual(validate({ ...config, speakerGreetings: schedule }).speakerGreetings, schedule);
+  assert.deepEqual(validate({ ...config, speakerGreetings: [] }, { currentConfig: { speakerGreetings: schedule } }).speakerGreetings, []);
   assert.throws(() => validate({ ...config, homeAssistantPermission: "disabled", speakerGreetings: schedule }), /先开启/u);
   assert.throws(() => offline({ ...config, speakerGreetings: schedule }), /先配置/u);
-  for (const raw of [null, true, "false", [], {}, { morning: true }, { morning: true, noon: 0, night: false }, { morning: true, noon: false, night: false, extra: true }]) {
-    assert.throws(() => validate({ ...config, speakerGreetings: raw }), /分别设置/u);
+  for (const raw of [null, true, "false", {}, { morning: true }, { morning: true, noon: 0, night: false }, { morning: true, noon: false, night: false, extra: true }]) {
+    assert.throws(() => validate({ ...config, speakerGreetings: raw }), /计划列表/u);
   }
 });
 

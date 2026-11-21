@@ -32,7 +32,8 @@ async function fixture(t, { configs = [{ morning: true, noon: false, night: fals
       return { accepted: true, confirmation: "HA 已接受，声音未经核实" };
     } };
   const targets = configs.map((config, index) => {
-    const state = { replyEnabled: true, codexConfig: { homeAssistantPermission: "owner", speakerGreetings: config }, pendingMessages: [{ text: "未处理消息" }] };
+    const state = { replyEnabled: true, codexConfig: { homeAssistantPermission: "owner",
+      speakerGreetings: { morning: false, noon: false, night: false, ...config } }, pendingMessages: [{ text: "未处理消息" }] };
     return { type: index % 2 ? "private" : "group", id: String(10000 + index), store: { snapshot: () => state },
       state, worker: { runQzoneSequence: async (id, callback) => {
         if (held) await new Promise((resolve) => calls.releases.push(resolve));
@@ -45,7 +46,7 @@ async function fixture(t, { configs = [{ morning: true, noon: false, night: fals
     clock: (value) => { now = new Date(value); }, global: (value) => { enabled = value; } };
 }
 
-test("fixed Shanghai slots default off and each target/slot is independently enabled", async (t) => {
+test("enabled legacy slots migrate to independent Shanghai schedules", async (t) => {
   const off = await fixture(t, { configs: [{}] });
   for (const at of ["2026-10-13T23:00:00Z", "2026-10-14T05:00:00Z", "2026-10-14T15:30:00Z"]) {
     off.clock(at); await off.coordinator.tick();
@@ -56,7 +57,7 @@ test("fixed Shanghai slots default off and each target/slot is independently ena
   await f.coordinator.tick(); await f.coordinator.drain();
   f.clock("2026-10-14T05:00:00Z"); await f.coordinator.tick(); await f.coordinator.drain();
   f.clock("2026-10-14T15:30:00Z"); await f.coordinator.tick(); await f.coordinator.drain();
-  assert.deepEqual(f.calls.model.map((call) => [call.id, call.options.qqToolContext.greetingJobId.split(":").at(-1)]), [["10000", "morning"], ["10001", "noon"], ["10000", "night"]]);
+  assert.deepEqual(f.calls.model.map((call) => [call.id, call.options.qqToolContext.greetingJobId.split(":")[3]]), [["10000", "morning"], ["10001", "noon"], ["10000", "night"]]);
   assert.equal(f.calls.model.every((call) => call.options.trigger === "speaker-greeting" && !call.prompt.includes("未处理消息")), true);
   for (const { prompt } of f.calls.model) {
     assert.match(prompt, /mcp__qq_gateway__read_home_devices/);

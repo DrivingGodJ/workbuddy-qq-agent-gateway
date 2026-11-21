@@ -134,7 +134,7 @@ test("unlink restores the parked session only after confirmation and preserves p
 
 test("shared model controls inherit only three parameters and linked config submits only channel permissions", async () => {
   const renderSource = slice("function renderAgentSettings(", "\nfunction renderContextLink(");
-  const controls = ["agentSettingsSummary", "agentModel", "agentReasoningEffort", "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentSpeakerMorning", "agentSpeakerNoon", "agentSpeakerNight", "speakerGreetingsHint", "saveAgentSettingsButton", "agentSettingsHint", "agentSettingsStatus", "agentSettingsForm"];
+  const controls = ["agentSettingsSummary", "agentModel", "agentReasoningEffort", "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "speakerGreetingRows", "speakerGreetingSettings", "speakerGreetingsHint", "saveAgentSettingsButton", "agentSettingsHint", "agentSettingsStatus", "agentSettingsForm"];
   const item = { key: "private:100", kind: "private", data: {
     targetId: "100", contextLink: { groupId: "200" }, codexConfig: { model: "private-model", reasoningEffort: "high", contextTokenLimit: 100000, permissionMode: "readOnly", calendarRemindersEnabled: false, homeAssistantPermission: "disabled" },
     effectiveCodexConfig: { model: "group-model", reasoningEffort: "low", contextTokenLimit: 200000, permissionMode: "dangerFullAccess", calendarRemindersEnabled: true, homeAssistantPermission: "group" }
@@ -147,6 +147,7 @@ test("shared model controls inherit only three parameters and linked config subm
     isSpeakerGreetingBusy: () => false, agentName: () => "测试助手", currentTarget: () => item, scheduleRefresh: noop, window: { confirm: () => { throw new Error("private must not open group authorization dialog"); } },
     api: async (_, options) => { payload = JSON.parse(options.body); return { codexConfig: item.data.codexConfig }; }
   };
+  Object.assign(context.els.speakerGreetingRows, { replaceChildren: noop, querySelectorAll: () => [], children: [] });
   for (const [fn, control] of [["populateModelOptions", "agentModel"], ["populateEffortOptions", "agentReasoningEffort"], ["populateContextOptions", "agentContextTokenLimit"], ["populatePermissionOptions", "agentPermissionMode"], ["populateHomeAssistantPermissionOptions", "agentHomeAssistantPermission"]]) context[fn] = (value) => { context.els[control].value = value; };
   runInNewContext(renderSource, context);
   context.renderAgentSettings(item);
@@ -173,6 +174,7 @@ test("shared model controls inherit only three parameters and linked config subm
   assert.equal(payload.permissionMode, "workspaceWrite");
   assert.equal(payload.calendarRemindersEnabled, false);
   assert.equal(payload.homeAssistantPermission, "disabled");
+  assert.equal(payload.speakerGreetings.length, 0);
 });
 
 test("context queue accurately distinguishes own running work, queued channel and linked-channel activity", () => {

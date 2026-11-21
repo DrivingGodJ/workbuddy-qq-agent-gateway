@@ -27,6 +27,8 @@ import { EphemeralStickerCurator, StickerCurationCoordinator } from "./qq/sticke
 import { isUsableStickerDescription } from "./qq/sticker-label.js";
 import { QzoneCoordinator } from "./qq/qzone-coordinator.js";
 import { SpeakerGreetingCoordinator } from "./qq/speaker-greeting-coordinator.js";
+import { normalizeSpeakerGreetings } from "./qq/speaker-greeting-settings.js";
+import { parseSpeakerWeatherLocation } from "./qq/speaker-greeting-weather.js";
 import { normalizeOneBotGroupMessage, normalizeOneBotGroupPoke, normalizeOneBotPrivateMessage, formatLocalTime, renderOneBotMessageText } from "./qq/message-normalizer.js";
 import { OneBotClient } from "./qq/onebot-client.js";
 import { PrivateWorker } from "./qq/private-worker.js";
@@ -145,7 +147,7 @@ const defaultCodexConfig = {
   permissionMode: "workspaceWrite",
   calendarRemindersEnabled: false,
   homeAssistantPermission: "owner",
-  speakerGreetings: { morning: false, noon: false, night: false }
+  speakerGreetings: []
 };
 const codexExecutableArgs = codexAutoCompactTokenLimit == null ? [] : [
   "-c", `model_auto_compact_token_limit=${codexAutoCompactTokenLimit}`,
@@ -327,6 +329,7 @@ const homeAssistant = new HomeAssistantClient({
   allowedSpeakers: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_SPEAKERS || "").split(","))
 });
 const speakerGreetingsAvailable = homeAssistant.enabled && Boolean(homeAssistant.baseUrl && homeAssistant.token && homeAssistant.allowedSpeakers.size);
+const speakerWeatherLocation = parseSpeakerWeatherLocation(process.env.CODEX_REMOTE_CONTACT_SPEAKER_WEATHER_LOCATION);
 const worker = new GroupWorker({
   store, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager, subscriptionStore, automationClient, persona: personaStore,
   homeAssistant,
@@ -367,7 +370,7 @@ const qzone = new QzoneCoordinator({
 worker.qzone = qzone;
 privateWorker.qzone = qzone;
 const speakerGreetings = new SpeakerGreetingCoordinator({
-  filePath: join(dataDir, "speaker-greetings.json"), homeAssistant,
+  filePath: join(dataDir, "speaker-greetings.json"), homeAssistant, weatherLocation: speakerWeatherLocation,
   listTargets: () => [
     ...store.listGroups().filter((item) => allowedGroups.includes(item.groupId) && !removingTargets.has(`group:${item.groupId}`))
       .map((item) => ({ type: "group", id: item.groupId, store, worker })),
@@ -1311,7 +1314,8 @@ function publicState() {
       contextTokenOptions,
       permissionModeOptions,
       homeAssistantPermissionOptions,
-      speakerGreetingsAvailable
+      speakerGreetingsAvailable,
+      speakerWeatherCity: speakerWeatherLocation?.name || null
     },
     channels: { qq: true },
     qq: {
@@ -1508,23 +1512,20 @@ function validateCodexConfig(value, { targetType = "group", currentConfig = null
   if (!homePermission || !homePermission.targetTypes.includes(targetType)) {
     throw new HttpError(400, "请选择可用的智能家居权限；私聊不能开放全群权限");
   }
-  const greetingSlots = ["morning", "noon", "night"];
-  const speakerGreetings = value?.speakerGreetings === undefined
-    ? (currentConfig?.speakerGreetings || { morning: false, noon: false, night: false })
-    : value.speakerGreetings;
-  if (!speakerGreetings || typeof speakerGreetings !== "object" || Array.isArray(speakerGreetings)
-    || Object.keys(speakerGreetings).length !== greetingSlots.length
-    || !greetingSlots.every((slot) => typeof speakerGreetings[slot] === "boolean")) {
-    throw new HttpError(400, "小爱定时问候须分别设置早上、中午和晚上的开关");
+  const previousGreetings = normalizeSpeakerGreetings(currentConfig?.speakerGreetings);
+  let speakerGreetings = previousGreetings;
+  if (value?.speakerGreetings !== undefined) {
+    try { speakerGreetings = normalizeSpeakerGreetings(value.speakerGreetings, { strict: true }); }
+    catch (error) { throw new HttpError(400, error.message); }
   }
-  const enablingGreeting = greetingSlots.some((slot) => speakerGreetings[slot] && currentConfig?.speakerGreetings?.[slot] !== true);
+  const enablingGreeting = speakerGreetings.some((plan) => plan.enabled && !previousGreetings.some((old) => old.id === plan.id && old.enabled));
   if (enablingGreeting && homeAssistantPermission === "disabled") {
     throw new HttpError(400, "请先开启当前会话的智能家居与小爱发言权限");
   }
   if (enablingGreeting && !speakerGreetingsAvailable) {
     throw new HttpError(400, "请先配置可用的小爱发言实体和 HA 凭证，再开启定时问候");
   }
-  return { model, reasoningEffort, contextTokenLimit, workingMode, permissionMode, calendarRemindersEnabled, homeAssistantPermission, speakerGreetings: { ...speakerGreetings } };
+  return { model, reasoningEffort, contextTokenLimit, workingMode, permissionMode, calendarRemindersEnabled, homeAssistantPermission, speakerGreetings };
 }
 
 function normalizeWorkBuddyContextLimit(value) {

@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { EventEmitter } from "node:events";
 import { formatLocalTime } from "../qq/message-normalizer.js";
+import { normalizeSpeakerGreetings } from "../qq/speaker-greeting-settings.js";
 
 // A due subscription queues behind the active turn, then runs before later
 // ordinary wake-ups. Delivery retries and explicit controls still take precedence.
@@ -1040,11 +1041,7 @@ function normalizeCodexConfig(value, fallback = null) {
   const defaults = fallback && typeof fallback === "object" ? fallback : {};
   const rawLimit = source.contextTokenLimit ?? defaults.contextTokenLimit ?? null;
   const configuredLimit = Number(rawLimit ?? 0);
-  const greetingSlots = ["morning", "noon", "night"];
   const rawGreetings = Object.hasOwn(source, "speakerGreetings") ? source.speakerGreetings : defaults.speakerGreetings;
-  const greetingsValid = rawGreetings && typeof rawGreetings === "object" && !Array.isArray(rawGreetings)
-    && Object.keys(rawGreetings).length === greetingSlots.length
-    && greetingSlots.every((slot) => typeof rawGreetings[slot] === "boolean");
   return {
     model: String(source.model || defaults.model || "").trim() || null,
     reasoningEffort: String(source.reasoningEffort || defaults.reasoningEffort || "").trim() || null,
@@ -1059,7 +1056,7 @@ function normalizeCodexConfig(value, fallback = null) {
     homeAssistantPermission: ["disabled", "owner", "group"].includes(source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
       ? (source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
       : "disabled",
-    speakerGreetings: Object.fromEntries(greetingSlots.map((slot) => [slot, greetingsValid ? rawGreetings[slot] : false]))
+    speakerGreetings: normalizeSpeakerGreetings(rawGreetings)
   };
 }
 
