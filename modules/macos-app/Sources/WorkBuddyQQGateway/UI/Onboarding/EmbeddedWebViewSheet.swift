@@ -17,6 +17,16 @@ struct EmbeddedWebViewSheet: View {
     @State private var reloadToken = 0
     @State private var loadPhase: EmbeddedWebLoadPhase = .loading
 
+    private var sheetSize: CGSize {
+        let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        if kind == .noVNC {
+            let width = Swift.min(1320, Swift.max(1060, visible.width - 100))
+            let height = Swift.min(880, Swift.max(700, visible.height - 90))
+            return CGSize(width: width, height: height)
+        }
+        return CGSize(width: 960, height: 680)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -92,8 +102,14 @@ struct EmbeddedWebViewSheet: View {
                     .padding(24)
                 }
             }
-            .frame(minWidth: 900, minHeight: 620)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(
+            minWidth: Swift.min(sheetSize.width, 1020),
+            idealWidth: sheetSize.width,
+            minHeight: Swift.min(sheetSize.height, 660),
+            idealHeight: sheetSize.height
+        )
     }
 
     @ViewBuilder
@@ -137,8 +153,18 @@ struct EmbeddedWebViewSheet: View {
                     Text("首次扫码登录时 Linux QQ 不会显示「自动登录」选项，第二次启动才会出现。勾选后以后每次打开软件即可自动登录上线。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text("如果窗口太小、看不到完整 QQ 界面或无法操作，请点击「进入浏览器操作」。")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
                 }
                 Spacer()
+                Button {
+                    NSWorkspace.shared.open(kind.url)
+                } label: {
+                    Label("进入浏览器操作", systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
