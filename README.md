@@ -3,7 +3,7 @@
 <h1 align="center"><img src="docs/assets/hero-banner.svg" alt="WorkBuddy QQ Agent 网关"></h1>
 
 <p align="center">在 Mac 上用原生 SwiftUI 应用管理 WorkBuddy，让它在 QQ 群聊和私聊里接话、处理文件、整理通知。</p>
-<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>下载安装包</strong></a> · <a href="docs/GUIDE.zh-CN.md">使用与部署指南</a> · macOS 14+ · Apple Silicon</p>
+<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>下载安装包</strong></a> · <a href="docs/GUIDE.zh-CN.md">使用与部署指南</a> · <a href="docs/PERSONA_GUIDE.md"><strong>人格指南与文件规范</strong></a> · macOS 14+ · Apple Silicon</p>
 
 ## macOS 原生工作台
 
@@ -34,7 +34,7 @@
 | --- | --- |
 | **接住群聊和私聊里的任务** | 每个会话默认保留独立上下文。Agent 可以读取合并转发和图片，也可以发送文字、文件、图片和 QQ 原生表情。 |
 | **把重要通知送到对应会话** | 给群聊或私聊订阅只读来源。按收集窗口汇总通知，逐个送达，面板显示每个订阅者的处理进度。 |
-| **整理表情与聊天习惯** | 浏览和搜索表情库，编辑使用场景，管理黑名单。人格可导入、导出，供不同会话共同使用。 |
+| **整理表情与聊天习惯** | 浏览和搜索表情库，编辑使用场景，管理黑名单。人格可导入、导出，供不同会话共同使用（详见 [人格指南与文件规范](docs/PERSONA_GUIDE.md)）。 |
 | **按需开放工具** | 按会话为日历、提醒事项与智能家居授权。支持 Home Assistant、小爱音箱播报和 QQ 空间，具体能力取决于本机配置和 QQ 桥接。 |
 
 <details>
@@ -48,6 +48,7 @@
 
 ## 文档
 
+- **[人格指南与文件规范](docs/PERSONA_GUIDE.md)**（自定义人格 JSON 规范、模板与导入导出教程）
 - [完整功能与配置参考](docs/readme-reference.zh-CN.md) · [架构图](docs/architecture.png)
 - [权限与安全](SECURITY.md) · [Home Assistant](docs/HOME_ASSISTANT.md) · [本地定制](docs/LOCAL_CUSTOMIZATION.md)
 - [虚拟机部署](docs/MACOS_VM_DEPLOYMENT.md) · [问题反馈](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)

@@ -3,7 +3,7 @@
 <h1 align="center"><img src="docs/assets/hero-banner.svg" alt="WorkBuddy QQ Agent Gateway"></h1>
 
 <p align="center">Manage WorkBuddy in a native SwiftUI app for Mac. Bring it into QQ groups and direct messages to join conversations, handle files, and summarize notices.</p>
-<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>Download for Mac</strong></a> · <a href="docs/GUIDE.en.md">Setup and deployment</a> · macOS 14+ · Apple Silicon</p>
+<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>Download for Mac</strong></a> · <a href="docs/GUIDE.en.md">Setup and deployment</a> · <a href="docs/PERSONA_GUIDE.md"><strong>Persona Guide &amp; Spec (ZH)</strong></a> · macOS 14+ · Apple Silicon</p>
 
 ## Native macOS workspace
 
