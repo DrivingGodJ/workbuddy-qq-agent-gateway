@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1060" viewBox="0 0 1680 1060" role="img" aria-labelledby="title description">
+  <title id="title">WorkBuddy QQ Agent 网关架构</title>
+  <desc id="description">QQ 群聊、私聊和只读通知群经过 SnowLuma 或 OneBot 桥进入 Node.js 网关。网关管理逐目标队列和活动状态，通过 Python SDK 桥调用 WorkBuddy。每个群聊和私聊使用独立持久会话。WorkBuddy 经当前会话专属 MCP 请求读写 QQ；网关检查权限并处理发送确认。管理面板使用 HTTP API 和 SSE 展示同一后台状态。通知订阅、表情、空间和 Apple 自动化由网关调度。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#111e2a"/>
+      <stop offset="1" stop-color="#080e16"/>
+    </linearGradient>
+    <marker id="blue-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse"><path d="M0 0L9 4.5L0 9Z" fill="#7dcfff"/></marker>
+    <marker id="green-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse"><path d="M0 0L9 4.5L0 9Z" fill="#75d9b4"/></marker>
+    <marker id="gray-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#8fa0b4"/></marker>
+    <style>
+      text { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+      .title { fill:#f0f6fc; font-size:44px; font-weight:700; }
+      .heading { fill:#edf5fc; font-size:27px; font-weight:650; }
+      .body { fill:#c6d1df; font-size:22px; }
+      .small { fill:#92a4b8; font-size:18px; }
+      .kicker { fill:#7dcfff; font-size:18px; font-weight:600; letter-spacing:2px; }
+      .card { fill:#14202d; stroke:#334255; stroke-width:1.5; }
+      .blue { fill:none; stroke:#7dcfff; stroke-width:2.5; marker-end:url(#blue-arrow); }
+      .green { fill:none; stroke:#75d9b4; stroke-width:2.5; stroke-dasharray:7 6; marker-start:url(#green-arrow); marker-end:url(#green-arrow); }
+      .gray { fill:none; stroke:#8fa0b4; stroke-width:2; marker-end:url(#gray-arrow); }
+    </style>
+  </defs>
+  <rect width="1680" height="1060" rx="24" fill="url(#background)"/>
+  <text x="48" y="59" class="kicker">WORKBUDDY · QQ AGENT GATEWAY</text>
+  <text x="48" y="117" class="title">为 WorkBuddy 定制的 QQ Agent 网关</text>
+  <text x="48" y="156" class="body">网关负责消息、权限与投递　WorkBuddy 负责推理、工具选择与长期上下文</text>
+
+  <rect x="328" y="195" width="1304" height="715" rx="24" fill="#0c151f" stroke="#2b3b4f" stroke-width="1.5"/>
+  <text x="352" y="230" class="small">本机服务 · macOS</text>
+
+  <rect x="48" y="296" width="240" height="281" rx="18" class="card"/>
+  <text x="72" y="337" class="heading">QQ 消息入口</text>
+  <text x="72" y="386" class="body">群聊 / 私聊</text>
+  <text x="72" y="421" class="small">@、名称、戳一戳、定时</text>
+  <path d="M72 447H264" stroke="#334255"/>
+  <text x="72" y="486" class="body">只读通知群</text>
+  <text x="72" y="522" class="small">供目标会话订阅和读取</text>
+  <text x="72" y="550" fill="#edbc7a" font-size="18">禁止向来源群发送</text>
+
+  <rect x="352" y="310" width="240" height="190" rx="18" class="card"/>
+  <text x="376" y="355" class="heading">QQ 协议桥</text>
+  <text x="376" y="397" class="body" style="font-size:20px">SnowLuma / OneBot</text>
+  <text x="376" y="435" class="small">接收事件 · 调用 QQ 接口</text>
+  <text x="376" y="470" class="small">QQ 登录态由协议桥持有</text>
+  <path d="M288 367H350" class="blue"/>
+  <text x="298" y="352" class="small">消息</text>
+  <path d="M352 425H290" class="blue"/>
+  <text x="298" y="453" class="small">回复</text>
+
+  <rect x="672" y="274" width="400" height="421" rx="20" fill="#12283a" stroke="#4b83a6" stroke-width="2"/>
+  <text x="698" y="320" class="heading">QQ Agent 网关</text>
+  <text x="975" y="319" fill="#7dcfff" font-size="18">Node.js</text>
+  <path d="M698 343H1046" stroke="#335773"/>
+  <text x="698" y="385" class="body">消息标准化 + 媒体缓存</text>
+  <text x="698" y="433" class="body">触发 / 主动等待 / 逐目标队列</text>
+  <text x="698" y="481" class="body">会话作用域 + 订阅批次认领</text>
+  <rect x="696" y="513" width="352" height="106" rx="12" fill="#0c1b29" stroke="#335773"/>
+  <text x="714" y="548" fill="#7dcfff" font-size="21">pending + 上次回复 + 实时输出</text>
+  <text x="714" y="582" class="small">界面直接读取这份后台真实状态</text>
+  <text x="698" y="654" fill="#edbc7a" font-size="20">确认后提交截止点 · 失败保留消息</text>
+  <path d="M592 367H670" class="blue"/>
+  <text x="604" y="351" class="small">事件</text>
+  <path d="M672 461H594" class="blue"/>
+  <text x="604" y="490" class="small">API</text>
+
+  <rect x="1152" y="274" width="456" height="234" rx="18" fill="#123129" stroke="#3a7966" stroke-width="1.5"/>
+  <text x="1176" y="320" class="heading">WorkBuddy Agent</text>
+  <text x="1176" y="365" class="body">Node 适配器 → Python SDK 桥</text>
+  <text x="1176" y="403" class="body">→ WorkBuddy / CodeBuddy CLI</text>
+  <path d="M1176 427H1584" stroke="#315f50"/>
+  <text x="1176" y="463" fill="#75d9b4" font-size="22">每群 / 每私聊独立持久 thread</text>
+  <text x="1176" y="491" class="small">长期上下文与自动压缩由引擎管理</text>
+  <path d="M1072 369H1150" class="blue"/>
+  <text x="1086" y="354" class="small">轮次</text>
+  <path d="M1152 434H1074" class="blue"/>
+  <text x="1086" y="464" class="small">流式</text>
+
+  <rect x="352" y="580" width="240" height="115" rx="18" class="card"/>
+  <text x="376" y="620" class="heading">管理面板</text>
+  <text x="376" y="653" class="small">模型 · 权限 · 订阅 · 表情</text>
+  <text x="376" y="679" class="small">开关 / 实时输出 / 中断</text>
+  <path d="M594 639H670" class="green"/>
+  <text x="600" y="622" fill="#75d9b4" font-size="16">API / SSE</text>
+
+  <rect x="1152" y="580" width="456" height="115" rx="18" class="card"/>
+  <text x="1176" y="620" class="heading">当前会话专属 qq_gateway MCP</text>
+  <text x="1176" y="653" class="small">读消息 / 转发 / 链接 · 发消息 / @ / 文件 / 图片</text>
+  <text x="1176" y="679" class="small">表情 / 戳一戳 / 空间 · 等待 / 结束对话</text>
+  <path d="M1380 510V578" class="green"/>
+  <text x="1400" y="550" fill="#75d9b4" font-size="18">stdio · 工具请求 / 结果</text>
+  <path d="M1074 639H1150" class="green"/>
+  <text x="1084" y="622" fill="#75d9b4" font-size="18">鉴权</text>
+
+  <path d="M872 695V743" class="gray"/>
+  <rect x="352" y="746" width="1256" height="138" rx="16" fill="#101c28" stroke="#334255"/>
+  <text x="372" y="775" class="small">网关持久状态与扩展模块</text>
+  <text x="372" y="811" fill="#edf5fc" font-size="21">状态 / 订阅 / 人格</text>
+  <text x="372" y="844" class="small">待处理消息、截止点、发送收据</text>
+  <text x="372" y="871" class="small">通知被全部订阅目标送达后清理</text>
+  <path d="M694 794V868" stroke="#334255"/>
+  <text x="718" y="811" fill="#edf5fc" font-size="21">媒体 / 表情 / 黑名单</text>
+  <text x="718" y="844" class="small">去重 → 临时识图 / 筛选 → 入库</text>
+  <text x="718" y="871" class="small">识图会话不积累长期上下文</text>
+  <path d="M1067 794V868" stroke="#334255"/>
+  <text x="1091" y="811" fill="#edf5fc" font-size="21">空间 / 文件 / Apple 自动化</text>
+  <text x="1091" y="844" class="small">动态任务、临时上传副本与清理</text>
+  <text x="1091" y="871" class="small">日历 / 提醒：逐会话授权，写后核验</text>
+
+  <path d="M48 951H82" fill="none" stroke="#7dcfff" stroke-width="3"/>
+  <text x="96" y="957" class="small">消息 / 会话</text>
+  <path d="M279 951H313" fill="none" stroke="#75d9b4" stroke-width="3" stroke-dasharray="7 6"/>
+  <text x="327" y="957" class="small">控制 / 工具请求与结果</text>
+  <path d="M607 951H641" fill="none" stroke="#8fa0b4" stroke-width="2"/>
+  <text x="655" y="957" class="small">后台状态与扩展</text>
+  <text x="48" y="1008" fill="#c6d1df" font-size="21">边界：来源群只读 · 工具只能作用于授权目标 · 总开关关闭仍记录消息 · 原文件不删除</text>
+  <text x="1632" y="1008" text-anchor="end" class="small">公开版架构 · 无私人部署数据</text>
+</svg>
