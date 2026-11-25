@@ -312,7 +312,7 @@ struct OnboardingWindow: View {
             .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
 
             depRow("Node.js (>= 20.6)", path: caps?.nodePath, installArg: "node")
-            depRow("Python 3", path: caps?.pythonPath, installArg: "python")
+            depRow("Python 3 (>= 3.10)", path: caps?.pythonPath, installArg: "python")
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

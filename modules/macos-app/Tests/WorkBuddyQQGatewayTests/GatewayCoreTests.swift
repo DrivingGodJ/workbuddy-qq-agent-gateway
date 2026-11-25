@@ -62,6 +62,17 @@ struct GatewayCoreTests {
         #expect(state.calendarRemindersReady)
     }
 
+    @Test("Python version check requires 3.10 or newer")
+    func pythonVersionSupport() {
+        #expect(!DeploymentDetector.isSupportedPythonVersion("Python 3.9.6"))
+        #expect(!DeploymentDetector.isSupportedPythonVersion("3.9"))
+        #expect(!DeploymentDetector.isSupportedPythonVersion("2.7.18"))
+        #expect(!DeploymentDetector.isSupportedPythonVersion(""))
+        #expect(DeploymentDetector.isSupportedPythonVersion("3.10"))
+        #expect(DeploymentDetector.isSupportedPythonVersion("Python 3.12.13"))
+        #expect(DeploymentDetector.isSupportedPythonVersion("3.14.0"))
+    }
+
     @Test("ContextTokenLimit decodes both auto and integer token limits")
     func contextTokenLimitCoding() throws {
         let autoJSON = Data(#""auto""#.utf8)

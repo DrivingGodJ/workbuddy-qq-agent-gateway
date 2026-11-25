@@ -220,8 +220,8 @@ public final class OnboardingOrchestrator {
             return
         }
 
-        guard let basePython = detector.findBasePython() else {
-            lastError = "未找到 Python 3，请先通过 Homebrew 安装 python。"
+        guard let basePython = await detector.findSupportedBasePython() else {
+            lastError = "未找到 Python 3.10 及以上版本（macOS 自带的 Python 3.9 不兼容 codebuddy-agent-sdk）。请先点击上方「Python 3 (>= 3.10)」右侧的「一键安装」，或先安装 python@3.12 后重试。"
             return
         }
 
@@ -231,7 +231,13 @@ public final class OnboardingOrchestrator {
 
         do {
             try FileManager.default.createDirectory(at: venvDir.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.isExecutableFile(atPath: venvPython),
+               !(await detector.isPythonSupported(at: venvPython)) {
+                appendLog("检测到已有虚拟环境 Python 版本低于 3.10，正在删除并使用 \(basePython) 重建…")
+                try? FileManager.default.removeItem(at: venvDir)
+            }
             if !FileManager.default.isExecutableFile(atPath: venvPython) {
+                appendLog("检测到可用 Python：\(basePython)")
                 appendLog("正在创建独立 Python 虚拟环境：\(venvDir.path)…")
                 let createRes = try await runner.run(
                     executable: basePython,

@@ -227,10 +227,11 @@ public final class DeploymentDetector: Sendable {
             }
         }
 
-        let pythonPath = pythonVenvPath ?? findBasePython()
+        var venvSupported = false
         var pythonSDKReady = false
         if let venvPy = pythonVenvPath {
-            if let res = try? await runner.run(
+            venvSupported = await isPythonSupported(at: venvPy)
+            if venvSupported, let res = try? await runner.run(
                 executable: venvPy,
                 arguments: ["-c", "import codebuddy_agent_sdk, anyio"],
                 currentDirectory: nil,
@@ -240,6 +241,8 @@ public final class DeploymentDetector: Sendable {
                 pythonSDKReady = true
             }
         }
+        let basePython = await findSupportedBasePython()
+        let pythonPath = (venvSupported ? pythonVenvPath : nil) ?? basePython
 
         var buildxReady = false
         if let dockerPath {
@@ -269,10 +272,94 @@ public final class DeploymentDetector: Sendable {
         )
     }
 
+    public static func parsePythonVersion(_ output: String) -> (major: Int, minor: Int)? {
+        let range = NSRange(output.startIndex..<output.endIndex, in: output)
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+)\.(\d+)"#),
+              let match = regex.firstMatch(in: output, range: range),
+              let majorRange = Range(match.range(at: 1), in: output),
+              let minorRange = Range(match.range(at: 2), in: output),
+              let major = Int(output[majorRange]),
+              let minor = Int(output[minorRange]) else {
+            return nil
+        }
+        return (major, minor)
+    }
+
+    public static func isSupportedPythonVersion(_ output: String) -> Bool {
+        guard let parsed = parsePythonVersion(output) else { return false }
+        return parsed.major > 3 || (parsed.major == 3 && parsed.minor >= 10)
+    }
+
+    public func isPythonSupported(at executablePath: String) async -> Bool {
+        guard let res = try? await runner.run(
+            executable: executablePath,
+            arguments: ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            currentDirectory: nil,
+            extraEnv: [:],
+            timeoutSeconds: 4
+        ), res.succeeded else {
+            return false
+        }
+        return Self.isSupportedPythonVersion(res.stdout)
+    }
+
+    public func findBasePythonCandidates() -> [String] {
+        let searchPaths = [
+            homeDirectory.appendingPathComponent(".local/bin").path,
+            "/opt/homebrew/bin",
+            "/opt/homebrew/opt/python@3.14/bin",
+            "/opt/homebrew/opt/python@3.13/bin",
+            "/opt/homebrew/opt/python@3.12/bin",
+            "/opt/homebrew/opt/python@3.11/bin",
+            "/opt/homebrew/opt/python@3.10/bin",
+            "/usr/local/bin",
+            "/usr/local/opt/python@3.14/bin",
+            "/usr/local/opt/python@3.13/bin",
+            "/usr/local/opt/python@3.12/bin",
+            "/usr/local/opt/python@3.11/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.14/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.13/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.11/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.10/bin",
+            homeDirectory.appendingPathComponent("miniconda3/bin").path,
+            homeDirectory.appendingPathComponent("anaconda3/bin").path,
+            homeDirectory.appendingPathComponent("miniforge3/bin").path,
+            homeDirectory.appendingPathComponent("mambaforge/bin").path,
+            "/opt/miniconda3/bin",
+            "/opt/anaconda3/bin",
+            "/opt/homebrew/miniconda3/bin",
+            "/opt/homebrew/anaconda3/bin",
+            "/opt/homebrew/Caskroom/miniconda/base/bin",
+            "/opt/homebrew/Caskroom/miniforge/base/bin",
+            "/opt/homebrew/Caskroom/anaconda/base/bin",
+            homeDirectory.appendingPathComponent(".pyenv/shims").path,
+            "/usr/bin",
+            "/bin"
+        ]
+        let names = ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]
+        var candidates: [String] = []
+        var seen = Set<String>()
+        for dir in searchPaths {
+            for name in names {
+                let candidate = (dir as NSString).appendingPathComponent(name)
+                if !seen.contains(candidate), fileManager.isExecutableFile(atPath: candidate) {
+                    seen.insert(candidate)
+                    candidates.append(candidate)
+                }
+            }
+        }
+        return candidates
+    }
+
     public func findBasePython() -> String? {
-        for name in ["python3.13", "python3.12", "python3.11", "python3"] {
-            if let found = findExecutable(named: name) {
-                return found
+        findBasePythonCandidates().first
+    }
+
+    public func findSupportedBasePython() async -> String? {
+        for candidate in findBasePythonCandidates() {
+            if await isPythonSupported(at: candidate) {
+                return candidate
             }
         }
         return nil
