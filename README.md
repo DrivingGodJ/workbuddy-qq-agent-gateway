@@ -1,59 +1,55 @@
-**简体中文** | [English](README.en.md)
+<p align="right"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
-# WorkBuddy QQ Agent 网关
+<h1 align="center"><img src="docs/assets/hero-banner.svg" alt="WorkBuddy QQ Agent 网关"></h1>
 
-让本机 WorkBuddy Agent 进入 QQ 的日常对话：接住群聊和私聊里的任务，把消息、文件与工具操作连起来，在网页里看见它正在做什么。
+<p align="center">在 Mac 上用原生 SwiftUI 应用管理 WorkBuddy，让它在 QQ 群聊和私聊里接话、处理文件、整理通知。</p>
+<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>下载安装包</strong></a> · <a href="docs/GUIDE.zh-CN.md">使用与部署指南</a> · macOS 14+ · Apple Silicon</p>
 
-![群聊控制台：待处理消息、上一条回复与实时生成内容](docs/screenshots/conversation.png)
+## macOS 原生工作台
 
-## 对话可以继续，任务也有来处
+<a href="docs/screenshots/macos-conversations.png"><img src="docs/screenshots/macos-conversations.png" alt="SwiftUI 主窗口，左侧是群聊、私聊和只读来源，中间是对话和实时回复，右侧是当前会话的模型与权限"></a>
 
-每个群和私聊默认保留自己的持久会话，重启后继续。Agent 可以按当前对话读取消息、展开转发、查看图片，再发送文字、文件、图片和原生表情。需要时，也可明确让私聊关联某个群的上下文。
+在侧栏切换群聊、私聊和通知来源，实时看消息与生成进度。在右侧调整当前会话的模型、思考强度和权限，随时暂停回复或终止任务。
 
-## 看得见进展，也能随时控制
+<table>
+<tr>
+<td width="50%"><a href="docs/screenshots/macos-onboarding.png"><img src="docs/screenshots/macos-onboarding.png" alt="SwiftUI 六步安装与登录向导"></a><br><strong>安装向导</strong> · 检查运行环境，引导登录 WorkBuddy 和 QQ。</td>
+<td width="50%"><a href="docs/screenshots/macos-settings.png"><img src="docs/screenshots/macos-settings.png" alt="SwiftUI 设置窗口中的人格与模型页面"></a><br><strong>原生设置</strong> · 管理人格、临时任务模型、局域网面板与系统权限。</td>
+</tr>
+</table>
 
-在面板查看实时输出、待处理消息和队列，调整会话模型与执行权限。想暂停回复或中断当前任务时，直接在界面操作，不必把控制命令混进群消息。
+*截图来自 v0.3.0 的 SwiftUI 界面，使用合成演示数据。点击可查看大图。*
 
-![会话设置：模型、推理、压缩与执行权限](docs/screenshots/settings.png)
+## 安装
 
-## 重要通知，不必每个群都盯着
+1. 在 [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest) 下载 Apple Silicon 的 `arm64.pkg` 安装包。
+2. 安装后从「应用程序」打开 **WorkBuddy QQ Gateway**，按向导准备运行环境，登录 WorkBuddy 和机器人 QQ 账号。
+3. 添加要接入的群聊或私聊，按会话配置模型与工具权限。
 
-为目标会话订阅只读通知来源，按等待窗口汇总，再分别发给需要的人。面板显示各订阅者的处理进度；通知仍有目标，不会变成无差别群发。
+已有部署可通过向导检测并接管。应用支持登录后自启、启动时静默检查 GitHub 新版本，以及导入和导出人格。安装和迁移细节见 [使用与部署指南](docs/GUIDE.zh-CN.md)。
 
-![通知来源与订阅者的处理状态](docs/screenshots/subscriptions.png)
+## 在 QQ 里能做什么
 
-## 也保留聊天里的表情与习惯
-
-表情库可以检索、修改场景和整理黑名单。需要扩展时，还能按独立授权接入 Home Assistant、Apple 日历/提醒、小爱播报与 QQ 空间功能。
-
-![表情展示台：浏览和管理可用表情](docs/screenshots/stickers.png)
-
-*以上均为真实前端配合合成演示数据，不包含实际 QQ 聊天记录。*
-
-## 下载安装或本地预览
-
-### 方式 A：Apple Silicon Mac 原生桌面端（推荐）
-
-前往 [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) 下载最新安装包 **`WorkBuddyQQGateway-0.3.0-arm64.pkg`**，双击安装到「应用程序」目录后打开即可按 6 步图形化引导完成配置：
-
-- **自动部署与接管**：检测并复用已有部署，或从零配置 Colima + SnowLuma 容器、macOS 钥匙串凭据与登录后自启；
-- **完整图形控制台**：内置群聊/私聊管理、好友列表快速添加私聊、群管自主权限开关（精华消息 / 违规禁言）、智能家居与小爱定时播报、表情库管理及局域网广播面板；
-- **人格导入导出与独立卸载器**：支持 `.laodai-persona.json` 人格备份导入导出，卸载时可选择仅移除 SnowLuma 容器/镜像或完整清理虚拟机。
-
-### 方式 B：源码本地演示（无需 QQ 与模型额度）
-
-项目提供不登录 QQ、不调用模型的本地演示，适合先看看网页控制台与交互：
-
-[打开演示与源码部署指南](docs/GUIDE.zh-CN.md)
-
-## 进一步了解
-
-| 想了解什么 | 去哪里看 |
+| 功能 | 使用方式 |
 | --- | --- |
-| 下载与使用、环境要求、源码部署 | [使用指南](docs/GUIDE.zh-CN.md) |
-| 会话、订阅、共享上下文和自动化 | [完整功能参考](docs/readme-reference.zh-CN.md) |
-| 权限、数据与安全 | [安全说明](SECURITY.md) |
-| 本地修改与家居集成 | [定制结构](docs/LOCAL_CUSTOMIZATION.md) · [Home Assistant](docs/HOME_ASSISTANT.md) |
-| 问题反馈与下载安装包 | [Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
+| **接住群聊和私聊里的任务** | 每个会话默认保留独立上下文。Agent 可以读取合并转发和图片，也可以发送文字、文件、图片和 QQ 原生表情。 |
+| **把重要通知送到对应会话** | 给群聊或私聊订阅只读来源。按收集窗口汇总通知，逐个送达，面板显示每个订阅者的处理进度。 |
+| **整理表情与聊天习惯** | 浏览和搜索表情库，编辑使用场景，管理黑名单。人格可导入、导出，供不同会话共同使用。 |
+| **按需开放工具** | 按会话为日历、提醒事项与智能家居授权。支持 Home Assistant、小爱音箱播报和 QQ 空间，具体能力取决于本机配置和 QQ 桥接。 |
 
-围绕 WorkBuddy 独立设计与维护。使用与扩展请遵守 [安全说明](SECURITY.md) 及所接入第三方服务（QQ、WorkBuddy、Home Assistant 等）的各自条款。
+<details>
+<summary>从手机访问局域网面板</summary>
+
+在 Mac 应用的设置里开启局域网面板，手机即可在同一局域网内访问并查看会话状态。也可以在源码目录运行 `npm run demo` 体验网页面板，演示无需登录 QQ 或调用模型。完整步骤见 <a href="docs/GUIDE.zh-CN.md">使用与部署指南</a>。
+
+<p><a href="docs/screenshots/web-lan-mobile.png"><img src="docs/screenshots/web-lan-mobile.png" width="280" alt="手机上的局域网网页面板，显示群聊消息和回复进度"></a></p>
+
+</details>
+
+## 文档
+
+- [完整功能与配置参考](docs/readme-reference.zh-CN.md) · [架构图](docs/architecture.png)
+- [权限与安全](SECURITY.md) · [Home Assistant](docs/HOME_ASSISTANT.md) · [本地定制](docs/LOCAL_CUSTOMIZATION.md)
+- [虚拟机部署](docs/MACOS_VM_DEPLOYMENT.md) · [问题反馈](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
+
+本项目围绕 WorkBuddy 独立维护。第三方服务及内置人格素材各有适用条款。详见 [素材来源说明](persona/QQ-BRIDGE-NOTICE.txt)。

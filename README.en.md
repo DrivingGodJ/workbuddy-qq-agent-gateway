@@ -1,59 +1,55 @@
-[简体中文](README.md) | **English**
+<p align="right"><a href="README.md">简体中文</a> · <strong>English</strong></p>
 
-# WorkBuddy QQ Agent Gateway
+<h1 align="center"><img src="docs/assets/hero-banner.svg" alt="WorkBuddy QQ Agent Gateway"></h1>
 
-Bring a local WorkBuddy Agent into everyday QQ conversations. Connect messages, files and tool actions in groups and private chats, and see what the Agent is doing through a web console.
+<p align="center">Manage WorkBuddy in a native SwiftUI app for Mac. Bring it into QQ groups and direct messages to join conversations, handle files, and summarize notices.</p>
+<p align="center"><a href="https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest"><strong>Download for Mac</strong></a> · <a href="docs/GUIDE.en.md">Setup and deployment</a> · macOS 14+ · Apple Silicon</p>
 
-![Conversation console with pending messages, the previous reply and live output](docs/screenshots/conversation.png)
+## Native macOS workspace
 
-## Keep the conversation and its context
+<a href="docs/screenshots/macos-conversations.png"><img src="docs/screenshots/macos-conversations.png" alt="SwiftUI workspace with groups, DMs, and read-only sources on the left, messages and live output in the middle, and conversation settings on the right"></a>
 
-Each group and private chat has a persistent session by default and continues after restarts. The Agent can read current conversation messages, expand forwards, inspect images and send text, files, images and native stickers. Explicit links can also let a private chat share a group's context.
+Switch between groups, DMs, and notification sources in the sidebar. Follow incoming messages and live output in the main window. Use the inspector to change a conversation’s model, reasoning effort, and permissions, or pause replies and stop a running task.
 
-## Follow progress and stay in control
+<table>
+<tr>
+<td width="50%"><a href="docs/screenshots/macos-onboarding.png"><img src="docs/screenshots/macos-onboarding.png" alt="Six-step SwiftUI setup and sign-in wizard"></a><br><strong>Setup assistant</strong> · Check dependencies and sign in to WorkBuddy and QQ.</td>
+<td width="50%"><a href="docs/screenshots/macos-settings.png"><img src="docs/screenshots/macos-settings.png" alt="Persona and model controls in the SwiftUI settings window"></a><br><strong>Native settings</strong> · Manage the persona, background-task model, LAN panel, and system permissions.</td>
+</tr>
+</table>
 
-Watch live output, pending messages and queues, then adjust models and execution permissions per session. Pause replies or stop a task directly in the interface instead of mixing control commands into chat.
+*Screenshots show the v0.3.0 SwiftUI interface in Chinese with synthetic demo data. Click an image to see it full size.*
 
-![Session settings for models, reasoning, compression and execution permissions](docs/screenshots/settings.png)
+## Install
 
-## Follow important notifications without watching every group
+1. Download the Apple Silicon `arm64.pkg` installer from [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest).
+2. Open **WorkBuddy QQ Gateway** from Applications. Follow the assistant to prepare the runtime and sign in to WorkBuddy and the bot’s QQ account.
+3. Add the groups or DMs you want to connect, and set the model and tool permissions for each conversation.
 
-Subscribe a destination to read-only notification sources, collect messages within a waiting window and summarize them for each intended recipient. The console shows subscriber progress; notifications retain explicit destinations.
+The assistant can detect and take over an existing deployment. The app supports starting at login, a quiet GitHub update check at launch, and persona import and export. See the [setup and deployment guide](docs/GUIDE.en.md) for installation and migration details.
 
-![Notification sources and per-subscriber processing progress](docs/screenshots/subscriptions.png)
+## What it can do in QQ
 
-## Keep the expression in the conversation
-
-Search stickers, edit their usage labels and manage a blacklist. Optional integrations add Home Assistant, Apple Calendar/Reminders, XiaoAI announcements and Qzone features under separate permissions.
-
-![Sticker library for browsing and managing available reactions](docs/screenshots/stickers.png)
-
-*All images show the real frontend with synthetic demo data, not real QQ conversations.*
-
-## Install or try the local demo
-
-### Option A: Apple Silicon macOS Desktop App (Recommended)
-
-Download **`WorkBuddyQQGateway-0.3.0-arm64.pkg`** from [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases), install it into `/Applications`, and follow the 6-step onboarding wizard:
-
-- **Guided setup & non-destructive takeover**: automatically detects existing deployments or sets up Colima + SnowLuma, macOS Keychain credentials, and login startup;
-- **Full native desktop & web console**: manage group/private sessions, add private chats from your QQ friend list, toggle autonomous group admin permissions (essence messages / moderation mutes), configure Home Assistant & XiaoAI scheduled greetings, curate stickers, and enable the LAN control panel;
-- **Persona backup & selective uninstall**: import/export `.laodai-persona.json` personas, with options to remove only the SnowLuma container/image or the full VM.
-
-### Option B: Local demo from source (no QQ or model usage)
-
-A local demo requires neither QQ login nor model calls, so you can explore the console first.
-
-[Demo and deployment guide](docs/GUIDE.en.md)
-
-## Explore further
-
-| Topic | Documentation |
+| Feature | How it works |
 | --- | --- |
-| Local demo, requirements and deployment | [User guide](docs/GUIDE.en.md) |
-| Sessions, subscriptions, shared context and automation | [Full reference (Chinese)](docs/readme-reference.zh-CN.md) |
-| Permissions, data and security | [Security](SECURITY.md) |
-| Local customization and home integration | [Customization](docs/LOCAL_CUSTOMIZATION.md) · [Home Assistant](docs/HOME_ASSISTANT.md) |
-| Downloads and feedback | [Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
+| **Handle tasks in groups and DMs** | Each conversation keeps its own context by default. The agent can read merged forwards and images, then send text, files, images, and native QQ stickers. |
+| **Route notices to the right conversations** | Subscribe groups or DMs to read-only sources. The gateway batches and summarizes notices, delivers them to each subscriber, and shows delivery progress. |
+| **Manage stickers and persona** | Search the sticker collection, edit descriptions, and manage the blacklist. Import or export the shared persona used across conversations. |
+| **Enable tools where you need them** | Grant access to Calendar, Reminders, and smart home controls per conversation. Home Assistant, XiaoAI announcements, and Qzone features depend on local configuration and the QQ bridge. |
 
-Independently built and maintained around WorkBuddy. Follow [Security](SECURITY.md) and the terms of the third-party tools and services you connect (QQ, WorkBuddy, Home Assistant, etc.).
+<details>
+<summary>Open the LAN panel on your phone</summary>
+
+Enable the LAN panel in the Mac app’s settings to view conversation status on a phone connected to the same network. Run <code>npm run demo</code> from the source checkout to try the web panel without QQ sign-in or model calls. See the <a href="docs/GUIDE.en.md">setup and deployment guide</a>.
+
+<p><a href="docs/screenshots/web-lan-mobile.png"><img src="docs/screenshots/web-lan-mobile.png" width="280" alt="Mobile LAN web panel showing group messages and live reply status"></a></p>
+
+</details>
+
+## Documentation
+
+- [Full feature and configuration reference (Chinese)](docs/readme-reference.zh-CN.md) · [Architecture](docs/architecture.png)
+- [Permissions and security](SECURITY.md) · [Home Assistant](docs/HOME_ASSISTANT.md) · [Local customization](docs/LOCAL_CUSTOMIZATION.md)
+- [Virtual machine deployment](docs/MACOS_VM_DEPLOYMENT.md) · [Report an issue](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
+
+This project is independently maintained for WorkBuddy. Third-party services and bundled persona material are subject to their own terms. See the [attribution notice](persona/QQ-BRIDGE-NOTICE.txt).
