@@ -5,7 +5,7 @@ import { conversationAction } from "../src/automation/conversation-actions.js";
 
 for (const targetType of ["group", "private"]) {
   test(`${targetType}: calendar permission works across ordinary turns and revokes immediately`, async () => {
-    const snapshot = { pendingMessages: [], codexConfig: { calendarRemindersEnabled: true }, liveSession: { actions: [] } };
+    const snapshot = { pendingMessages: [], agentConfig: { calendarRemindersEnabled: true }, liveSession: { actions: [] } };
     const writes = [], reads = [], receipts = [];
     const store = { snapshot: () => snapshot, assertReplyEnabled() {},
       async recordLiveActionSent(_id, action) { receipts.push(action); } };
@@ -27,7 +27,7 @@ for (const targetType of ["group", "private"]) {
     assert.equal(writes[0].actionId, writes[1].actionId, "writer reuses marker across turns");
     assert.equal((await next.liveTool("read_calendar_reminders", {}, {})).isError, false);
     assert.equal(receipts[0].chatReply, false, "writing must not claim a QQ notification was delivered");
-    snapshot.codexConfig.calendarRemindersEnabled = false;
+    snapshot.agentConfig.calendarRemindersEnabled = false;
     assert.equal((await next.liveTool("read_calendar_reminders", {}, {})).isError, true);
     assert.equal((await next.liveTool("add_calendar_reminder", { ...args, title: "另一个" }, {})).isError, true);
     assert.equal(writes.length, 2);

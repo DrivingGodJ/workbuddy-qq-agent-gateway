@@ -5,7 +5,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PID_FILE="$PROJECT_DIR/data/keep-awake.pid"
 
 if [ ! -f "$PID_FILE" ]; then
-  echo "No codexremotecontact keep-awake guard pid file found."
+  echo "No WorkBuddy QQ keep-awake guard pid file found."
   exit 0
 fi
 

@@ -126,7 +126,7 @@ export function createLiveConversationTools({
     if (context.ended && name !== "end_conversation") return answer("本轮对话已经结束，不能再读取或发送。", true);
     if (["read_calendar_reminders", "add_calendar_reminder"].includes(name)) {
       const authorize = () => {
-        if (store.snapshot(targetId).codexConfig?.calendarRemindersEnabled === false) throw new Error("当前会话日历自动化已关闭。");
+        if (store.snapshot(targetId).agentConfig?.calendarRemindersEnabled === false) throw new Error("当前会话日历自动化已关闭。");
         if (!automationClient) throw new Error("日历和待办服务尚未配置。");
         if (active?.cancelRequested || !canRun()) throw new Error("本轮已停止。");
         store.assertReplyEnabled(targetId);
@@ -305,7 +305,25 @@ export function createLiveConversationTools({
       }
       context.readCalled = true;
       const notes = [];
-      if (first) notes.push(`【当前会话日历/待办权限】${store.snapshot(targetId).codexConfig?.calendarRemindersEnabled === false ? "已关闭" : "已开启，可按需调用 read_calendar_reminders、add_calendar_reminder"}`);
+      if (first) notes.push(`【当前会话日历/待办权限】${store.snapshot(targetId).agentConfig?.calendarRemindersEnabled === false ? "已关闭" : "已开启，可按需调用 read_calendar_reminders、add_calendar_reminder"}`);
+      if (first && targetType === "group") {
+        const cfg = store.snapshot(targetId).agentConfig || {};
+        const groupAdminLines = [];
+        if (cfg.groupEssenceEnabled) {
+          groupAdminLines.push("• 已开启「设置精华消息」：若确认机器人为本群管理员，看到本群高质量干货、重要通知、神回复或大家认可的精彩内容时，可自主调用 manage_group(action=\"pin_message\", message_id=...) 设为精华（误设可用 unpin_message 移除），无需等待 OWNER 指令。");
+        }
+        if (cfg.groupMuteEnabled) {
+          groupAdminLines.push("• 已开启「管理群禁言」：若确认机器人为本群管理员，发现本轮已读发言中有普通成员明显违反公序良俗、恶意辱骂人身攻击、涉黄涉政、恶意刷屏广告或严重扰乱群秩序时，可按情节轻重自主调用 manage_group(action=\"mute_member\", user_id=..., duration_seconds=60~600) 酌情限时禁言（正常玩梗或普通吐槽请勿滥用；严禁对群主、其他管理员或 OWNER 禁言；误禁可用 unmute_member 解除）。");
+        }
+        if (groupAdminLines.length) {
+          notes.push(["【当前群管自主权限（已开启）】", ...groupAdminLines].join("\n"));
+        } else {
+          notes.push("【当前群管权限】自主设置精华消息：已关闭；管理群禁言：已关闭（勿调用 pin_message / unpin_message / mute_member / unmute_member / mute_all）。");
+        }
+      }
+      if (first && !scheduledTask && (context.stickers?.length || stickerManager)) {
+        notes.push("【表情包引导】日常聊天、接梗、吐槽、打招呼或表达情绪时请积极使用 send_reaction 发 QQ 收藏表情包或内置表情（可单发，也可配合短句顺手补一张）；不记得合适 ID 就直接 list_reactions 按 1–2 个关键词搜一张真实的发，不必只发纯文字。");
+      }
       if (!scheduledTask) {
         refreshQzonePermissions();
         if (trigger?.trust !== "OWNER" && (context.allowQzoneFeed || context.allowQzonePost)) {
@@ -398,7 +416,10 @@ export function createLiveConversationTools({
       try {
         store.assertReplyEnabled(targetId);
         if (name === "get_group_management") {
-          const result = await readGroupManagement({ oneBot, groupId: targetId, botId: AGENT_QQ_ID, args });
+          const result = await readGroupManagement({
+            oneBot, groupId: targetId, botId: AGENT_QQ_ID, args,
+            permissions: store.snapshot(targetId).agentConfig || {}
+          });
           return answer(JSON.stringify(result));
         }
         const ownerMessage = currentOwnerManagementMessage(messageReader, targetId, OWNER_QQ_ID,
@@ -410,7 +431,8 @@ export function createLiveConversationTools({
         if (alreadyDone) return answer("这项完全相同的群管理操作在此前中断的轮次里已由 QQ 确认执行，本轮不重复操作。");
         const result = await manageGroup({
           oneBot, groupId: targetId, botId: AGENT_QQ_ID, ownerId: OWNER_QQ_ID,
-          ownerMessage, messageReader, args
+          ownerMessage, messageReader, args,
+          permissions: store.snapshot(targetId).agentConfig || {}
         });
         await store.recordLiveActionSent(targetId, {
           kind: "group_management", summary: `[${actionKey}] ${result.summary}`,
@@ -465,7 +487,7 @@ export function createLiveConversationTools({
         if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭。", true);
         sent = targetType === "group" && segments
           ? await oneBot.sendGroupSegments(targetId, [
-              ...(replyToMessageId != null && !String(replyToMessageId).startsWith("codex-ui-")
+              ...(replyToMessageId != null && !String(replyToMessageId).startsWith("gateway-ui-")
                 ? [{ type: "reply", data: { id: String(replyToMessageId) } }] : []),
               ...segments
             ]) : targetType === "group"

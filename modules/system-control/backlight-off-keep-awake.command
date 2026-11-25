@@ -5,12 +5,12 @@ PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PID_FILE="$PROJECT_DIR/data/keep-awake.pid"
 BRIGHTNESS_FILE="$PROJECT_DIR/data/previous-brightness.txt"
 LOG_FILE="$PROJECT_DIR/runtime/logs/keep-awake.log"
-BACKLIGHT="$PROJECT_DIR/modules/system-control/bin/codexremotecontact-backlight"
+BACKLIGHT="$PROJECT_DIR/modules/system-control/bin/workbuddy-qq-backlight"
 
 mkdir -p "$PROJECT_DIR/data" "$PROJECT_DIR/runtime/logs"
 
 if [ ! -x "$BACKLIGHT" ]; then
-  echo "找不到 codexremotecontact 背光工具：$BACKLIGHT"
+  echo "找不到 WorkBuddy QQ 背光工具：$BACKLIGHT"
   exit 1
 fi
 
@@ -26,7 +26,7 @@ if [ -f "$PID_FILE" ]; then
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" >/dev/null 2>&1; then
     COMMAND_NAME="$(ps -p "$OLD_PID" -o comm= 2>/dev/null || true)"
     if [[ "$COMMAND_NAME" == *caffeinate* ]]; then
-      echo "codexremotecontact keep-awake is already running. pid=$OLD_PID"
+      echo "WorkBuddy QQ keep-awake is already running. pid=$OLD_PID"
     else
       rm -f "$PID_FILE"
     fi

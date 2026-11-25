@@ -2,9 +2,9 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LABEL="local.codexremotecontact.chat-hub"
+LABEL="local.workbuddy.qq-agent-gateway.chat-hub"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-QQ_LABEL="local.codexremotecontact.qq-runtime"
+QQ_LABEL="local.workbuddy.qq-agent-gateway.qq-runtime"
 QQ_PLIST="$HOME/Library/LaunchAgents/$QQ_LABEL.plist"
 PORT="3789"
 USER_DOMAIN="gui/$(id -u)"
@@ -20,7 +20,7 @@ start_qq_runtime() {
 }
 
 if lsof -tiTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "codexremotecontact Chat Hub is already running:"
+  echo "WorkBuddy QQ Agent Gateway is already running:"
   echo "http://localhost:$PORT"
   start_qq_runtime || echo "QQ background recovery could not be loaded; Hub remains online." >&2
   exit 0
@@ -40,7 +40,7 @@ fi
 
 for _ in {1..30}; do
   if lsof -tiTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "codexremotecontact Chat Hub started:"
+    echo "WorkBuddy QQ Agent Gateway started:"
     echo "http://localhost:$PORT"
     start_qq_runtime || echo "QQ background recovery could not be loaded; Hub remains online." >&2
     exit 0
@@ -48,6 +48,6 @@ for _ in {1..30}; do
   sleep 1
 done
 
-echo "codexremotecontact Chat Hub did not start. Check:"
+echo "WorkBuddy QQ Agent Gateway did not start. Check:"
 echo "$PROJECT_DIR/runtime/logs/chat-hub.err.log"
 exit 1

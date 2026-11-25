@@ -53,9 +53,8 @@ Ordinary replies time out after 3 continuous minutes without progress; compressi
 
 - [Detailed features, setup, permissions and limits (Chinese)](../docs/readme-reference.zh-CN.md)
 - [Home Assistant](../docs/HOME_ASSISTANT.md) · [Local customization](../docs/LOCAL_CUSTOMIZATION.md)
-- [Provenance](../docs/PROVENANCE.md) · [License notice](../LICENSE-NOTICE.md)
-- [Report an issue](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
+- [Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [Report an issue](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
 
-## License and credits
+## Notes
 
-Thanks to original author [Epic0522](https://github.com/Epic0522). Upstream has no license, and this repository does not claim a blanket MIT/Apache license. Read the license/provenance notices and obtain necessary permissions before use or distribution. Dependencies and persona materials have their own terms.
+This repository is maintained independently for WorkBuddy QQ Agent Gateway and does not bundle third-party licenses, model quotas, or private data. Third-party dependencies and persona templates carry their own applicable terms (see [persona/QQ-BRIDGE-NOTICE.txt](../persona/QQ-BRIDGE-NOTICE.txt)).

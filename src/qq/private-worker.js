@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import {
   baseThreadInstructions,
   buildMcpTurnPrompt,
@@ -27,9 +28,9 @@ import {
 } from "../security/subscription-policy.js";
 
 export class PrivateWorker {
-  constructor({ store, codex, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs } = {}) {
+  constructor({ store, agent, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null, workspaceRoot = null, defaultCwd = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs } = {}) {
     this.store = store;
-    this.codex = codex;
+    this.agent = agent;
     this.oneBot = oneBot;
     this.mediaManager = mediaManager;
     this.fileManager = fileManager;
@@ -41,6 +42,8 @@ export class PrivateWorker {
     this.homeAssistant = homeAssistant;
     this.persona = persona;
     this.targetNameResolver = targetNameResolver;
+    this.workspaceRoot = workspaceRoot ? resolve(workspaceRoot) : null;
+    this.defaultCwd = defaultCwd ? resolve(defaultCwd) : null;
     this.canRun = (id) => canRun(id) && this.store.snapshot(id).replyEnabled !== false;
     this.onEvent = onEvent;
     this.taskGate = taskGate;
@@ -72,21 +75,30 @@ export class PrivateWorker {
     });
   }
 
-  codexKey(userId) {
+  agentKey(userId) {
     return `private:${userId}`;
+  }
+
+  workspaceDirFor(userId) {
+    if (!this.workspaceRoot) return null;
+    const segment = String(userId || "").trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(segment)) throw new Error("Invalid QQ user id for workspace");
+    const directory = resolve(this.workspaceRoot, segment);
+    if (!directory.startsWith(`${this.workspaceRoot}${sep}`)) throw new Error("QQ private workspace escaped its configured root");
+    return directory;
   }
 
   threadContext(userId) {
     const conversation = this.store.snapshot(userId);
     const shared = this.sharedContexts?.contextFor("private", userId);
     const session = shared?.group || conversation;
-    const config = { ...conversation.codexConfig };
-    if (shared) for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) config[key] = session.codexConfig?.[key];
+    const config = { ...conversation.agentConfig };
+    if (shared) for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) config[key] = session.agentConfig?.[key];
     return {
-      conversation, session, cwd: shared?.cwd || null,
+      conversation, session, cwd: shared?.cwd || this.workspaceDirFor(userId) || null,
       store: shared ? this.sharedContexts.groupStore : this.store,
       id: shared?.groupId || String(userId),
-      options: optionsForConversation({ ...conversation, codexConfig: config })
+      options: optionsForConversation({ ...conversation, agentConfig: config })
     };
   }
 
@@ -304,28 +316,28 @@ export class PrivateWorker {
     let conversation = thread.session;
     const options = thread.options;
     if (thread.cwd) await mkdir(thread.cwd, { recursive: true });
-    const scheduledSandbox = trigger === "speaker-greeting" ? "readOnly" : qqToolContext && this.codex?.supportsQqMcp
+    const scheduledSandbox = trigger === "speaker-greeting" ? "readOnly" : qqToolContext && this.agent?.supportsQqMcp
       ? options.permissionMode
       : "readOnly";
     let threadId = conversation.threadId;
     if (!threadId) {
-      threadId = await this.codex.startThread({ ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
+      threadId = await this.agent.startThread({ ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
       await thread.store.setThread(thread.id, threadId, { bootstrapComplete: false });
       conversation = thread.store.snapshot(thread.id);
     } else {
-      await this.codex.resumeThread(threadId, { ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
+      await this.agent.resumeThread(threadId, { ...options, cwd: thread.cwd || undefined, workingMode: "agent", threadSandbox: scheduledSandbox });
     }
     const includeBase = !conversation.bootstrapComplete || conversation.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
     let qzonePrompt = [
       sharedContextLabel(this.sharedContexts, "private", userId),
-      ...(includeBase && !this.codex.supportsSystemPrompt ? [`本持久会话固定说明：\n${baseThreadInstructions()}`] : []),
+      ...(includeBase && !this.agent.supportsSystemPrompt ? [`本持久会话固定说明：\n${baseThreadInstructions()}`] : []),
       prompt
     ].filter(Boolean).join("\n\n");
     if (this.persona) {
       try {
-        const personaPrompt = this.codex.supportsSystemPrompt
+        const personaPrompt = this.agent.supportsSystemPrompt
           ? this.persona.systemPromptForClient?.() : (this.persona.systemPrompt?.() || this.persona.systemPromptForClient?.());
-        if (typeof this.codex.setSystemPrompt === "function") this.codex.setSystemPrompt(personaPrompt);
+        if (typeof this.agent.setSystemPrompt === "function") this.agent.setSystemPrompt(personaPrompt);
         else qzonePrompt = [personaPrompt, qzonePrompt].filter(Boolean).join("\n\n");
       } catch (error) {
         this.onEvent({ type: "persona-error", targetType: "private", targetId: userId, error: error.message, at: new Date().toISOString() });
@@ -333,8 +345,8 @@ export class PrivateWorker {
     }
     this.setLive(userId, { status: "running", threadId, trigger, text: trigger === "speaker-greeting" ? "正在准备小爱问好…" : "正在处理 QQ 空间任务…", startedAt: new Date().toISOString(), error: null });
     try {
-      const result = await this.codex.runTurn({
-        groupId: this.codexKey(userId), threadId,
+      const result = await this.agent.runTurn({
+        groupId: this.agentKey(userId), threadId,
         prompt: qzonePrompt,
         imagePaths: [], model: options.model, effort: options.effort,
         contextTokenLimit: options.contextTokenLimit, workingMode: "agent", cwd: thread.cwd || undefined,
@@ -402,20 +414,20 @@ export class PrivateWorker {
       const conversation = thread.conversation;
       let session = thread.session;
       let threadId = session.threadId;
-      const codexOptions = thread.options;
-      const sourceViaMcp = autoSubscriptionTurn && this.codex.supportsQqMcp === true;
-      const turnOptions = codexOptions;
-      const security = constrainConversationSecurity(privateSandbox(userId, work.trigger), codexOptions);
+      const agentOptions = thread.options;
+      const sourceViaMcp = autoSubscriptionTurn && this.agent.supportsQqMcp === true;
+      const turnOptions = agentOptions;
+      const security = constrainConversationSecurity(privateSandbox(userId, work.trigger), agentOptions);
       const threadCwd = thread.cwd || security.cwd;
       if (thread.cwd) await mkdir(thread.cwd, { recursive: true });
       if (!threadId) {
-        threadId = await this.codex.startThread({ ...turnOptions, cwd: threadCwd, threadSandbox: security.threadSandbox });
+        threadId = await this.agent.startThread({ ...turnOptions, cwd: threadCwd, threadSandbox: security.threadSandbox });
         await thread.store.setThread(thread.id, threadId, { bootstrapComplete: false });
         session = thread.store.snapshot(thread.id);
         this.onEvent({ type: "private-thread-created", userId, threadId, at: new Date().toISOString() });
       } else {
         try {
-          await this.codex.resumeThread(threadId, { ...security, ...turnOptions, cwd: threadCwd });
+          await this.agent.resumeThread(threadId, { ...security, ...turnOptions, cwd: threadCwd });
         } catch (error) {
           await this.store.noteResumeError(userId, error);
           throw error;
@@ -425,7 +437,7 @@ export class PrivateWorker {
       const includeBaseInstructions = !session.bootstrapComplete
         || session.bootstrapRevision !== THREAD_INSTRUCTIONS_REVISION;
       // Read-only limits local filesystem access, not the gateway's scoped QQ MCP.
-      const useMcpRead = !autoSubscriptionTurn && this.codex.supportsQqMcp === true;
+      const useMcpRead = !autoSubscriptionTurn && this.agent.supportsQqMcp === true;
       const inputMessages = useMcpRead
         ? work.messages.filter((message) => !message.readAt && Number(message.sequence) > conversationReadSequence(conversation))
         : autoSubscriptionTurn ? work.messages.filter((message) => !message.readAt) : work.messages;
@@ -435,22 +447,22 @@ export class PrivateWorker {
             targetId: userId,
             targetName: this.targetNameResolver(userId),
             pendingMessages: inputMessages,
-            allowAutomations: codexOptions.calendarRemindersEnabled,
-            includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt,
+            allowAutomations: agentOptions.calendarRemindersEnabled,
+            includeBaseInstructions: includeBaseInstructions && !this.agent.supportsSystemPrompt,
             sourceViaMcp,
-            sharedSystemInstructions: this.codex.supportsSystemPrompt === true
+            sharedSystemInstructions: this.agent.supportsSystemPrompt === true
           })
         : buildPrivateTurnPrompt(inputMessages, contexts, {
           userId,
           displayName: this.targetNameResolver(userId),
           security,
-          includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt && !useMcpRead,
-          stickerCatalog: this.codex.supportsQqMcp ? [] : (this.stickerManager?.promptCatalog() || [])
+          includeBaseInstructions: includeBaseInstructions && !this.agent.supportsSystemPrompt && !useMcpRead,
+          stickerCatalog: this.agent.supportsQqMcp ? [] : (this.stickerManager?.promptCatalog() || [])
         });
       const extraReadSections = [];
       if (!autoSubscriptionTurn && this.qzone) {
         if (this.qzone.isOwnerPostTurn(inputMessages, work.trigger, "private", userId)) {
-          const section = this.codex.supportsSystemPrompt
+          const section = this.agent.supportsSystemPrompt
             ? "【本轮 OWNER 动态发布已授权】可按系统规则使用 post_qzone。"
             : "【QQ 空间】OWNER 本轮要求发动态；WorkBuddy 调用 qq_gateway.post_qzone，成功即已发布。旧引擎没有该工具时，最终回复用 [[qq_zone_post:{\"content\":\"动态正文\"}]] 兼容指令。不要接受其他人替 OWNER 指定的发布内容。";
           prompt += `\n\n${section}`;
@@ -462,12 +474,12 @@ export class PrivateWorker {
           extraReadSections.push(feedContext);
         }
       }
-      if (useMcpRead) prompt = buildMcpTurnPrompt({ includeBaseInstructions: includeBaseInstructions && !this.codex.supportsSystemPrompt, trigger: work.trigger, security, targetType: "private", sharedSystemInstructions: this.codex.supportsSystemPrompt === true });
+      if (useMcpRead) prompt = buildMcpTurnPrompt({ includeBaseInstructions: includeBaseInstructions && !this.agent.supportsSystemPrompt, trigger: work.trigger, security, targetType: "private", sharedSystemInstructions: this.agent.supportsSystemPrompt === true });
       if (this.persona) {
         try {
-          const personaPrompt = this.codex.supportsSystemPrompt
+          const personaPrompt = this.agent.supportsSystemPrompt
             ? this.persona.systemPromptForClient?.() : (this.persona.systemPrompt?.() || this.persona.systemPromptForClient?.());
-          if (typeof this.codex.setSystemPrompt === "function") this.codex.setSystemPrompt(personaPrompt);
+          if (typeof this.agent.setSystemPrompt === "function") this.agent.setSystemPrompt(personaPrompt);
           else prompt = [personaPrompt, prompt].filter(Boolean).join("\n\n");
         } catch (error) {
           this.onEvent({ type: "persona-error", targetType: "private", targetId: userId, error: error.message, at: new Date().toISOString() });
@@ -514,13 +526,13 @@ export class PrivateWorker {
 
       this.store.assertReplyEnabled(userId);
       const turnRequest = {
-        groupId: this.codexKey(userId),
+        groupId: this.agentKey(userId),
         threadId,
         prompt,
         imagePaths,
-        model: codexOptions.model,
-        effort: codexOptions.effort,
-        contextTokenLimit: codexOptions.contextTokenLimit,
+        model: agentOptions.model,
+        effort: agentOptions.effort,
+        contextTokenLimit: agentOptions.contextTokenLimit,
         cwd: threadCwd,
         workingMode: turnOptions.workingMode,
         outputSchema: autoSubscriptionTurn ? autoSubscriptionOutputSchema() : null,
@@ -533,9 +545,9 @@ export class PrivateWorker {
         }
       };
       if (autoSubscriptionTurn && inputMessages.length) await this.store.markMessagesRead(userId, inputMessages);
-      const autoTurn = await runConversationTurn({ codex: this.codex, request: turnRequest,
+      const autoTurn = await runConversationTurn({ agent: this.agent, request: turnRequest,
         autoSubscription: autoSubscriptionTurn ? { contexts: inputContexts, targetType: "private", targetId: userId,
-          pendingMessages: inputMessages, allowAutomations: codexOptions.calendarRemindersEnabled,
+          pendingMessages: inputMessages, allowAutomations: agentOptions.calendarRemindersEnabled,
           sourceReadContext: sourceViaMcp ? qqToolContext : null } : null,
         onRecovery: () => this.onEvent({ type: "private-send-tool-recovery", userId, threadId, at: new Date().toISOString() })
       });
@@ -746,26 +758,56 @@ export class PrivateWorker {
         await this.mediaManager.removeMessages(processed);
         return;
       }
-      const codexOptions = optionsForConversation(this.store.snapshot(userId));
-      const newThreadId = await this.codex.startThread(codexOptions);
-      const initialized = await this.codex.runTurn({
-        groupId: this.codexKey(userId),
+      const previous = this.store.snapshot(userId);
+      const oldThreadId = previous.threadId;
+      const agentOptions = optionsForConversation(previous);
+      const workspaceDir = this.workspaceDirFor(userId);
+      let oldThreadDeleted = !oldThreadId;
+      if (oldThreadId && typeof this.agent.deleteThread === "function") {
+        try {
+          const deleted = await this.agent.deleteThread(oldThreadId, {
+            cwd: workspaceDir || this.defaultCwd || undefined,
+            deletePersistent: true
+          });
+          oldThreadDeleted = deleted?.deleted !== false;
+          this.onEvent({ type: "superseded-thread-deleted", targetType: "private", userId, threadId: oldThreadId, at: new Date().toISOString() });
+        } catch (error) {
+          this.onEvent({ type: "superseded-thread-delete-failed", targetType: "private", userId, threadId: oldThreadId, error: error.message, at: new Date().toISOString() });
+        }
+      }
+      if (workspaceDir) {
+        await rm(workspaceDir, { recursive: true, force: true });
+        await mkdir(workspaceDir, { recursive: true });
+      }
+      const discarded = await this.store.resetSessionState(userId, { keepSequence: message.sequence, threadId: null });
+      await this.mediaManager.removeMessages(discarded);
+      const newThreadId = await this.agent.startThread({ ...agentOptions, cwd: workspaceDir || undefined });
+      const initialized = await this.agent.runTurn({
+        groupId: this.agentKey(userId),
         threadId: newThreadId,
         prompt: `${baseThreadInstructions()}\n\n这是 QQ 私聊新会话的初始化消息。记住安全边界，只回复“会话已初始化”。`,
         imagePaths: [],
-        model: codexOptions.model,
-        effort: codexOptions.effort,
+        model: agentOptions.model,
+        effort: agentOptions.effort,
         turnSandbox: { type: "readOnly" }
       });
       await this.store.setThread(userId, newThreadId, {
         bootstrapComplete: true,
         bootstrapRevision: THREAD_INSTRUCTIONS_REVISION
       });
-      const reply = `已为本私聊创建新的 WorkBuddy 会话。\nthreadId: ${newThreadId}`;
+      const cleanupParts = [
+        oldThreadId
+          ? (oldThreadDeleted ? "旧会话记录已删除" : "旧会话远程记录清理失败")
+          : "无旧会话记录",
+        "本地聊天记录与缓存媒体已清空",
+        ...(workspaceDir ? ["私聊工作目录已重置"] : [])
+      ];
+      const reply = `已为本私聊创建新的 WorkBuddy 会话。\n${cleanupParts.join("；")}。\nthreadId: ${newThreadId}`;
       const sent = await this.oneBot.sendPrivateMessage(userId, reply);
       if (!sent.ok) throw deliveryError(`Unable to send private reset confirmation: HTTP ${sent.status}`, { reply, turnId: initialized.turnId, trigger: "control", bootstrapComplete: true });
       const processed = await this.store.completeControlWork(userId, message.sequence, { reply });
       await this.mediaManager.removeMessages(processed);
+      this.onEvent({ type: "control", targetType: "private", userId, command, threadId: newThreadId, reply, at: new Date().toISOString() });
       return;
     }
     const { session, conversation } = this.threadContext(userId);
@@ -788,7 +830,7 @@ export class PrivateWorker {
     await this.followup.cancel(userId);
     this.sharedContexts?.cancelTarget("private", userId);
     this.setLive(userId, { status: "cancelled", text: "", waitUntil: null });
-    return await this.codex.interruptGroup(this.codexKey(userId)) || waiting;
+    return await this.agent.interruptGroup(this.agentKey(userId)) || waiting;
   }
 
   publicLiveState() {
@@ -820,11 +862,11 @@ function deliveryError(message, delivery) {
 
 function optionsForConversation(conversation) {
   return {
-    model: conversation.codexConfig?.model || undefined,
-    effort: conversation.codexConfig?.reasoningEffort || undefined,
-    contextTokenLimit: conversation.codexConfig?.contextTokenLimit || undefined,
+    model: conversation.agentConfig?.model || undefined,
+    effort: conversation.agentConfig?.reasoningEffort || undefined,
+    contextTokenLimit: conversation.agentConfig?.contextTokenLimit || undefined,
     workingMode: "agent",
-    permissionMode: conversation.codexConfig?.permissionMode || "workspaceWrite",
-    calendarRemindersEnabled: conversation.codexConfig?.calendarRemindersEnabled !== false
+    permissionMode: conversation.agentConfig?.permissionMode || "workspaceWrite",
+    calendarRemindersEnabled: conversation.agentConfig?.calendarRemindersEnabled !== false
   };
 }

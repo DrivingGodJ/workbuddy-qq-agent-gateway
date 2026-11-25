@@ -2,12 +2,12 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TEMPLATE="$PROJECT_DIR/config/local.codexremotecontact.chat-hub.plist.example"
-TARGET="$PROJECT_DIR/config/local.codexremotecontact.chat-hub.plist"
-LABEL="local.codexremotecontact.chat-hub"
+TEMPLATE="$PROJECT_DIR/config/local.workbuddy.qq-agent-gateway.chat-hub.plist.example"
+TARGET="$PROJECT_DIR/config/local.workbuddy.qq-agent-gateway.chat-hub.plist"
+LABEL="local.workbuddy.qq-agent-gateway.chat-hub"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 INSTALLED_PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
-RUNNER_DIR="${CODEX_REMOTE_CONTACT_LAUNCHER_DIR:-$HOME/.codexremotecontact}"
+RUNNER_DIR="${WORKBUDDY_QQ_LAUNCHER_DIR:-$HOME/.workbuddy-qq-gateway}"
 RUNNER_PATH="$RUNNER_DIR/run-qq-only.command"
 
 mkdir -p "$RUNNER_DIR"
@@ -22,7 +22,7 @@ cp -f "$TARGET" "$INSTALLED_PLIST"
 chmod 600 "$INSTALLED_PLIST"
 echo "Installed $INSTALLED_PLIST"
 
-QQ_LABEL="local.codexremotecontact.qq-runtime"
+QQ_LABEL="local.workbuddy.qq-agent-gateway.qq-runtime"
 QQ_RUNNER_PATH="$RUNNER_DIR/run-qq-runtime.command"
 QQ_TARGET="$PROJECT_DIR/config/$QQ_LABEL.plist"
 QQ_INSTALLED_PLIST="$LAUNCH_AGENTS_DIR/$QQ_LABEL.plist"

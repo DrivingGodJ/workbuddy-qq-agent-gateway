@@ -23,7 +23,7 @@ const group = (id, name, extra = {}) => ({
   groupId: id, targetId: id, targetType: "group", groupName: name,
   threadId: "demo-thread-" + id, threadCreatedAt: now, lastActivityAt: now,
   threadLock: { status: "locked" }, conversationType: "AGENT_CHAT_GROUP",
-  replyEnabled: true, codexConfig: config, pendingCount: 2, busy: false,
+  replyEnabled: true, agentConfig: config, pendingCount: 2, busy: false,
   pendingMessages: [msg(11, "小林", "图纸做好了 要不要看看"), msg(12, "阿岚", "@老代 帮忙检查一下尺寸")],
   lastCompletedReply: { text: "先核对轮廓尺寸\n导出的文件可以直接发到这个群", completedAt: now },
   activeReply: { running: false, text: "", status: "idle", error: null },

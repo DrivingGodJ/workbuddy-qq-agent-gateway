@@ -124,8 +124,8 @@ class BridgeRecoveryTests(unittest.IsolatedAsyncioTestCase):
         for client in clients:
             client.connect = AsyncMock()
         with patch.dict(os.environ, {
-            "CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT": "http://127.0.0.1:12345/call",
-            "CODEX_REMOTE_CONTACT_QQ_MCP_SECRET": "test-secret",
+            "WORKBUDDY_QQ_MCP_ENDPOINT": "http://127.0.0.1:12345/call",
+            "WORKBUDDY_QQ_MCP_SECRET": "test-secret",
         }), patch("codebuddy_agent_sdk.CodeBuddySDKClient", side_effect=clients) as factory:
             await bridge._make_client(normal)
             await bridge._make_client(source)
@@ -144,7 +144,7 @@ class BridgeRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(source_options.permission_mode, "default")
         source_server = source_options.mcp_servers["qq_gateway"]
         self.assertFalse(source_server["defer_loading"])
-        self.assertEqual(source_server["env"]["CODEX_REMOTE_CONTACT_QQ_MCP_SOURCE_ONLY"], "1")
+        self.assertEqual(source_server["env"]["WORKBUDDY_QQ_MCP_SOURCE_ONLY"], "1")
         self.assertEqual(source_server["tools"], {})
 
     async def test_full_and_ephemeral_sessions_preserve_their_existing_tool_scope(self) -> None:
@@ -157,8 +157,8 @@ class BridgeRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 fake = FakeClient()
                 fake.connect = AsyncMock()
                 with patch.dict(os.environ, {
-                    "CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT": "http://127.0.0.1:12345/call",
-                    "CODEX_REMOTE_CONTACT_QQ_MCP_SECRET": "test-secret",
+                    "WORKBUDDY_QQ_MCP_ENDPOINT": "http://127.0.0.1:12345/call",
+                    "WORKBUDDY_QQ_MCP_SECRET": "test-secret",
                 }), patch("codebuddy_agent_sdk.CodeBuddySDKClient", return_value=fake) as factory:
                     await bridge._make_client(session)
                 options = factory.call_args.kwargs["options"]

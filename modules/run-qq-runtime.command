@@ -1,11 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="${CODEX_REMOTE_CONTACT_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-ENV_FILE="$PROJECT_DIR/config/qq-only.env"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+PROJECT_DIR="${WORKBUDDY_QQ_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+ENV_FILE="${WORKBUDDY_QQ_ENV_FILE:-$PROJECT_DIR/config/qq-only.env}"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if [ -f "$ENV_FILE" ]; then
-  BOOTSTRAP_NODE="${CODEX_REMOTE_CONTACT_NODE_PATH:-}"
+  BOOTSTRAP_NODE="${WORKBUDDY_QQ_NODE_PATH:-}"
   if [ -z "$BOOTSTRAP_NODE" ] || [ ! -x "$BOOTSTRAP_NODE" ]; then
     for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
       if [ -x "$candidate" ]; then BOOTSTRAP_NODE="$candidate"; break; fi
@@ -19,12 +19,12 @@ if [ -f "$ENV_FILE" ]; then
   eval "$RUNTIME_ENV_EXPORTS"
   unset RUNTIME_ENV_EXPORTS
 fi
-COLIMA_PROFILE="${CODEX_REMOTE_CONTACT_COLIMA_PROFILE:-snowluma}"
-SNOWLUMA_CONTAINER="${CODEX_REMOTE_CONTACT_SNOWLUMA_CONTAINER:-snowluma}"
-COLIMA_BIN="${CODEX_REMOTE_CONTACT_COLIMA_PATH:-/opt/homebrew/bin/colima}"
-DOCKER_BIN="${CODEX_REMOTE_CONTACT_DOCKER_PATH:-/opt/homebrew/bin/docker}"
-DOCKER_CONTEXT="${CODEX_REMOTE_CONTACT_DOCKER_CONTEXT:-colima-snowluma}"
-NODE_BIN="${CODEX_REMOTE_CONTACT_NODE_PATH:-/opt/homebrew/bin/node}"
+COLIMA_PROFILE="${WORKBUDDY_QQ_COLIMA_PROFILE:-snowluma}"
+SNOWLUMA_CONTAINER="${WORKBUDDY_QQ_SNOWLUMA_CONTAINER:-snowluma}"
+COLIMA_BIN="${WORKBUDDY_QQ_COLIMA_PATH:-/opt/homebrew/bin/colima}"
+DOCKER_BIN="${WORKBUDDY_QQ_DOCKER_PATH:-/opt/homebrew/bin/docker}"
+DOCKER_CONTEXT="${WORKBUDDY_QQ_DOCKER_CONTEXT:-colima-snowluma}"
+NODE_BIN="${WORKBUDDY_QQ_NODE_PATH:-/opt/homebrew/bin/node}"
 if [[ ! "$COLIMA_PROFILE" =~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' ]]; then
   echo "Invalid Colima profile; refusing runtime recovery." >&2
   exit 1

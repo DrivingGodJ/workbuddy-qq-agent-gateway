@@ -28,11 +28,28 @@ export class OneBotClient {
   }
 
   async getLoginInfo() {
-    return this.request("/get_login_info", null, { method: "GET" });
+    return this.request("/get_login_info", null, { method: "GET", timeoutMs: 3000 });
   }
 
   async getStatus() {
-    return this.request("/get_status", null, { method: "GET" });
+    return this.request("/get_status", null, { method: "GET", timeoutMs: 3000 });
+  }
+
+  async loginStatus() {
+    try {
+      const [account, runtime] = await Promise.all([this.getLoginInfo(), this.getStatus()]);
+      const userId = Number(account.data?.user_id);
+      const status = runtime.data ?? null;
+      const ok = Number.isSafeInteger(userId) && userId > 0 && status?.online !== false;
+      return {
+        ok,
+        login: ok ? { user_id: userId, nickname: account.data?.nickname ?? null } : null,
+        status,
+        error: ok ? null : "QQ 尚未登录"
+      };
+    } catch (error) {
+      return { ok: false, login: null, status: null, error: error.message };
+    }
   }
 
   async getGroupInfo(groupId) {
@@ -63,6 +80,11 @@ export class OneBotClient {
       no_cache: false
     });
     return result.data || null;
+  }
+
+  async getFriendList() {
+    const result = await this.request("/get_friend_list", { no_cache: false }, { timeoutMs: 8000 });
+    return Array.isArray(result.data) ? result.data : [];
   }
 
   async getMessage(messageId) {
@@ -108,7 +130,7 @@ export class OneBotClient {
 
   async sendGroupMessage(groupId, text, { replyToMessageId = null } = {}) {
     const message = [];
-    if (replyToMessageId != null && !String(replyToMessageId).startsWith("codex-ui-")) {
+    if (replyToMessageId != null && !String(replyToMessageId).startsWith("gateway-ui-")) {
       message.push({ type: "reply", data: { id: String(replyToMessageId) } });
     }
     message.push({ type: "text", data: { text: String(text || "") } });

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>登录 · WorkBuddy QQ 局域网控制面板</title>
+    <link rel="stylesheet" href="/client.css" />
+    <style>
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .lan-login-card {
+        width: 100%;
+        max-width: 400px;
+        padding: 28px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(20, 25, 36, 0.92);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+      }
+      .lan-login-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .lan-login-head h1 {
+        font-size: 1.25rem;
+        margin: 0;
+      }
+      .lan-login-desc {
+        color: var(--muted, #9aa5b5);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        margin: 0 0 18px;
+      }
+      .lan-login-form {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .lan-login-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 0.9rem;
+      }
+      .lan-login-form input[type="password"] {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(0, 0, 0, 0.25);
+        color: inherit;
+        font-size: 1rem;
+      }
+      .lan-login-error {
+        color: #ff7b72;
+        font-size: 0.88rem;
+        min-height: 1.2em;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="lan-login-card">
+      <div class="lan-login-head">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v5A2.5 2.5 0 0 1 13.5 14H9l-3 2.5V14A2.5 2.5 0 0 1 4 11.5v-5Z" />
+            <path d="M16 9.5h1.5A2.5 2.5 0 0 1 20 12v4a2.5 2.5 0 0 1-2.5 2.5H16v2l-2.5-2h-4A2.5 2.5 0 0 1 7 16v-2" />
+          </svg>
+        </span>
+        <div>
+          <p class="eyebrow">LAN CONTROL PANEL</p>
+          <h1>QQ Agent 局域网控制面板</h1>
+        </div>
+      </div>
+      <p class="lan-login-desc">
+        当前通过局域网访问。请输入宿主 Mac 上设置的访问密码，登录后即可调整群聊/私聊参数、切换模型、管理人格与查看实时状态。
+      </p>
+      <form id="loginForm" class="lan-login-form">
+        <label for="passwordInput">
+          <span>访问密码</span>
+          <input id="passwordInput" type="password" autocomplete="current-password" placeholder="请输入访问密码" required autofocus />
+        </label>
+        <p id="errorText" class="lan-login-error" role="alert"></p>
+        <button id="submitBtn" class="button primary full-button" type="submit">登录控制面板</button>
+      </form>
+    </main>
+    <script type="module">
+      const form = document.getElementById("loginForm");
+      const passwordInput = document.getElementById("passwordInput");
+      const errorText = document.getElementById("errorText");
+      const submitBtn = document.getElementById("submitBtn");
+
+      try {
+        const res = await fetch("/api/lan-auth/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) location.replace("/client.html");
+        }
+      } catch {}
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorText.textContent = "";
+        submitBtn.disabled = true;
+        submitBtn.textContent = "登录中…";
+        try {
+          const res = await fetch("/api/lan-auth/login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ password: passwordInput.value })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `登录失败 (HTTP ${res.status})`);
+          location.replace("/client.html");
+        } catch (err) {
+          errorText.textContent = err.message;
+          passwordInput.select();
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "登录控制面板";
+        }
+      });
+    </script>
+  </body>
+</html>

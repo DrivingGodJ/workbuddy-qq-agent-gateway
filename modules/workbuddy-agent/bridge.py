@@ -2,8 +2,8 @@
 """
 WorkBuddy Agent 引擎桥（bridge）
 
-作用：把「CodeBuddy Agent SDK（Python）」包成一个跟 codex app-server 同构的
-      JSON-RPC over stdio 服务，让 Codex-Remote-Contact 只换引擎、不动传输层。
+作用：把「CodeBuddy Agent SDK（Python）」包成一个基于 JSON-RPC over stdio 的
+      持久会话服务，供 WorkBuddy QQ Agent Gateway 直接调度。
 
 协议（每行一个 JSON）：
   网关 -> 桥（请求）
@@ -15,7 +15,7 @@ WorkBuddy Agent 引擎桥（bridge）
     {"jsonrpc":"2.0","method":"turn/completed","params":{...}}
     {"jsonrpc":"2.0","method":"error","params":{...}}
 
-方法表（与 src/codex/client.js 用到的一一对应）：
+方法表（与 src/workbuddy/client.js 一一对应）：
   initialize            -> {ok, engine, sdk, cli, account}
   thread/start          -> {thread:{id}}
   thread/resume         -> {thread:{id}}
@@ -86,7 +86,10 @@ IMAGE_REDUCTION_ATTEMPTS = [
 # model/list 最多等账号探测多久（网关启动后立刻会拉一次目录）
 MODEL_PROBE_WAIT_S = 30.0
 # thread_id -> SDK session_id 的落盘映射，桥重启后靠它续接会话
-SESSION_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".session-map.json")
+# Must be captured before os.environ.clear() strips host variables.
+SESSION_MAP_PATH = os.environ.get("WB_AGENT_SESSION_MAP_PATH") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".session-map.json"
+)
 
 # ---------------------------------------------------------------------------
 # 环境隔离：必须在 import SDK 之前做，而且必须用「白名单」而不是「黑名单」。
@@ -119,7 +122,7 @@ _EXTRA_KEEP = {
 ENV_WHITELIST = {
     "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
     "LANG", "LC_ALL", "LC_CTYPE", "__CF_USER_TEXT_ENCODING", "TZ", "PWD",
-    "CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT", "CODEX_REMOTE_CONTACT_QQ_MCP_SECRET",
+    "WORKBUDDY_QQ_MCP_ENDPOINT", "WORKBUDDY_QQ_MCP_SECRET",
 } | _EXTRA_KEEP
 
 _DROPPED_ENV = [k for k in os.environ if k not in ENV_WHITELIST]
@@ -142,7 +145,7 @@ FALLBACK_MODELS = [
     "minimax-m3", "kimi-k3-1", "kimi-k2.8-preview", "kimi-k2.7", "kimi-k2.6",
 ]
 
-# Codex 的沙箱语汇 -> WorkBuddy 的权限模式
+# 网关沙箱语汇 -> WorkBuddy 的权限模式
 SANDBOX_TO_PERMISSION = {
     "readOnly": "dontAsk",
     "read-only": "dontAsk",
@@ -156,7 +159,7 @@ SANDBOX_TO_PERMISSION = {
 # 的 Literal 仍少了 minimal/max，但运行时不做类型拦截，CLI 能原样接收。
 EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"]
 DEFAULT_EFFORT = "auto"
-# auto 表示不传 --effort，交给当前模型决定；只保留 Codex 历史档位的安全回退。
+# auto 表示不传 --effort，交给当前模型决定；保留历史别名档位的安全回退。
 EFFORT_ALIASES = {"ultra": "max", "none": None, "auto": None}
 
 READ_ONLY_TOOLS = ["Read", "WebFetch", "WebSearch", "Glob", "Grep"]
@@ -379,6 +382,7 @@ class Bridge:
             "engine": "workbuddy",
             "sdk": self.sdk_version,
             "cli": CLI_PATH,
+            "account": self.account,
         }
 
     async def _probe_account(self) -> None:
@@ -386,9 +390,11 @@ class Bridge:
         if self._loaded_models:
             return
         self._loaded_models = True
+        self.account = {"probed": False, "loggedIn": False, "modelCount": len(self.models), "error": None}
         try:
             from codebuddy_agent_sdk import CodeBuddyAgentOptions, query
-        except Exception:
+        except Exception as exc:
+            self.account = {"probed": True, "loggedIn": False, "modelCount": len(self.models), "error": str(exc)[:200]}
             return
         try:
             # 故意传一个不存在的模型：SDK 会抛错并列出本账号可用模型
@@ -398,6 +404,7 @@ class Bridge:
             )
             async for _ in query(prompt="ping", options=opts):
                 pass
+            self.account = {"probed": True, "loggedIn": True, "modelCount": len(self.models), "error": None}
         except Exception as exc:
             text = str(exc)
             harvested = []
@@ -408,8 +415,26 @@ class Bridge:
             if harvested:
                 self.models = harvested
                 log(f"模型白名单已探测到 {len(harvested)} 个")
+            lower = text.lower()
+            auth_failed = any(marker in lower for marker in ("authentication required", "not logged in", "unauthorized", "login required"))
+            self.account = {
+                "probed": True,
+                "loggedIn": (not auth_failed) and (bool(harvested) or "not found" in lower or "currently supported models" in lower),
+                "modelCount": len(self.models),
+                "error": None if ("not found" in lower or harvested) else text[:200],
+            }
             if "not found" not in text:
                 log(f"账号探测异常（忽略）: {text[:200]}")
+
+    async def engine_status(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "engine": "workbuddy",
+            "sdk": self.sdk_version,
+            "cli": CLI_PATH,
+            "account": self.account,
+            "modelCount": len(self.models),
+        }
 
     # ---------------- thread_id -> SDK session_id 映射 ----------------
 
@@ -431,6 +456,9 @@ class Bridge:
         self._save_session_map()
 
     def _save_session_map(self, strict: bool = False) -> None:
+        session_dir = os.path.dirname(os.path.abspath(SESSION_MAP_PATH))
+        if session_dir:
+            os.makedirs(session_dir, exist_ok=True)
         temporary = f"{SESSION_MAP_PATH}.tmp-{os.getpid()}"
         try:
             with open(temporary, "w", encoding="utf-8") as fh:
@@ -767,8 +795,8 @@ class Bridge:
 
         self._ensure_resume_history(session.cwd, resume)
         extra_args = session_extra_args(session)
-        mcp_endpoint = os.environ.get("CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT", "")
-        mcp_secret = os.environ.get("CODEX_REMOTE_CONTACT_QQ_MCP_SECRET", "")
+        mcp_endpoint = os.environ.get("WORKBUDDY_QQ_MCP_ENDPOINT", "")
+        mcp_secret = os.environ.get("WORKBUDDY_QQ_MCP_SECRET", "")
         mcp_servers = {}
         # Read-only scheduled QQ Space turns still need the scoped gateway MCP.
         # The Node active-turn context denies tools outside that scheduled task.
@@ -783,9 +811,9 @@ class Bridge:
                 "defer_loading": False,
                 "tools": {},
                 "env": {
-                    "CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT": mcp_endpoint,
-                    "CODEX_REMOTE_CONTACT_QQ_MCP_SECRET": mcp_secret,
-                    **({"CODEX_REMOTE_CONTACT_QQ_MCP_SOURCE_ONLY": "1"} if session.source_read_only else {}),
+                    "WORKBUDDY_QQ_MCP_ENDPOINT": mcp_endpoint,
+                    "WORKBUDDY_QQ_MCP_SECRET": mcp_secret,
+                    **({"WORKBUDDY_QQ_MCP_SOURCE_ONLY": "1"} if session.source_read_only else {}),
                 },
             }
         system_parts = [session.system_prompt] if session.system_prompt else []
@@ -1166,7 +1194,7 @@ class Bridge:
                             fallback = getattr(result_message, "result", None)
                     if fallback and str(fallback).strip():
                         turn.text = str(fallback)
-                    elif not os.environ.get("CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT"):
+                    elif not os.environ.get("WORKBUDDY_QQ_MCP_ENDPOINT"):
                         subtype = getattr(result_message, "subtype", None) if result_message else None
                         stop_reason = getattr(result_message, "stop_reason", None) if result_message else None
                         details = ", ".join(item for item in [subtype, stop_reason] if item)
@@ -1341,7 +1369,7 @@ class Bridge:
         attached_count = 0
         used_bytes = 0
         deadline = time.monotonic() + MAX_IMAGE_PREPARATION_SECONDS
-        with tempfile.TemporaryDirectory(prefix="codexremotecontact-agent-images-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="workbuddy-qq-agent-images-") as temp_dir:
             for index, path in enumerate(existing_paths):
                 remaining_count = len(existing_paths) - index
                 if time.monotonic() >= deadline:
@@ -1545,10 +1573,10 @@ class Bridge:
     # ---------------- 列表 ----------------
 
     async def model_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """按 codex app-server 的 model/list 形状返回。
+        """按网关 model/list 协议形状返回模型目录。
 
-        网关的 refreshCodexModels 会把「没有 supportedReasoningEfforts」的条目全部丢掉，
-        所以这里必须带上档位，否则模型目录会退化成 Codex 的兜底名单。
+        网关的 refreshAvailableModels 会要求每个条目携带 supportedReasoningEfforts，
+        所以这里统一带上支持档位，以免模型目录退化为默认兜底名单。
 
         网关是在启动后立刻拉一次目录的，此时账号探测（要跑一次 CLI 往返）可能还没回来，
         所以这里有限度地等它一下，避免目录短暂显示成兜底名单。
@@ -1601,6 +1629,7 @@ class Bridge:
     async def dispatch(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         table = {
             "initialize": self.initialize,
+            "engine/status": self.engine_status,
             "thread/start": self.thread_start,
             "thread/resume": self.thread_resume,
             "thread/delete": self.thread_delete,

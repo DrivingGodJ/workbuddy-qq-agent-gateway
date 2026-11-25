@@ -81,9 +81,9 @@ export class SpeakerGreetingCoordinator {
   }
 
   enabledPlan(target, { date, slot, time }) {
-    if (!this.canRun() || !target || this.homeAssistant?.enabled === false || !this.homeAssistant?.allowedSpeakers?.size) return null;
+    if (!this.canRun() || !target || !this.homeAssistant?.configured) return null;
     const snapshot = target.store.snapshot(target.id);
-    const config = snapshot.codexConfig;
+    const config = snapshot.agentConfig;
     if (snapshot.replyEnabled === false || !["owner", "group"].includes(config?.homeAssistantPermission)) return null;
     return normalizeSpeakerGreetings(config.speakerGreetings).find((plan) =>
       plan.id === slot && plan.enabled && plan.time === time && plan.days.includes(weekday(date))) || null;
@@ -120,7 +120,7 @@ export class SpeakerGreetingCoordinator {
     const parts = shanghaiParts(this.clock());
     for (const target of this.targets()) {
       if (!["group", "private"].includes(target.type) || !TARGET_ID.test(String(target.id))) continue;
-      for (const plan of normalizeSpeakerGreetings(target.store.snapshot(target.id).codexConfig?.speakerGreetings)) {
+      for (const plan of normalizeSpeakerGreetings(target.store.snapshot(target.id).agentConfig?.speakerGreetings)) {
         const planKey = `${target.type}:${target.id}:${parts.date}:${plan.id}`;
         const id = `${planKey}:${plan.time}`;
         if (plan.time !== parts.time || this.jobs[id] || this.jobs[planKey]?.time === plan.time) continue;
@@ -149,8 +149,7 @@ export class SpeakerGreetingCoordinator {
     return plan;
   }
 
-  contextFor(job, active, weather) {
-    const speakerId = this.homeAssistant.allowedSpeakers.values().next().value;
+  contextFor(job, active, weather, speakerId) {
     const context = { liveMode: true, requireRead: false, scheduledSpeakerGreeting: true, greetingJobId: job.id, targetType: job.type,
       allowMessage: false, ended: false, failed: false, spoken: false, readCalled: false, error: null };
     context.liveTool = async (name, args = {}, modelActive = null) => {
@@ -204,12 +203,16 @@ export class SpeakerGreetingCoordinator {
       if (typeof target?.worker?.runQzoneSequence !== "function") throw new Error("会话 worker 未提供持久队列，不能执行小爱定时问候。");
       await target.worker.runQzoneSequence(target.id, async (runTurn) => {
         const plan = this.assertActive(job, active);
+        const speakerId = await this.homeAssistant.resolveGreetingSpeaker();
+        if (!speakerId) throw new Error("小爱播报设备不可用，本次未播报。");
+        this.assertActive(job, active);
         await this.update(() => { job.stage = "generating"; });
         this.notify(job);
-        const weather = plan.weather ? await this.weatherText(this.weatherLocation, shanghaiParts(this.clock()).date) : "";
+        const includeWeather = plan.weather && Boolean(this.weatherLocation);
+        const weather = includeWeather ? await this.weatherText(this.weatherLocation, shanghaiParts(this.clock()).date) : "";
         this.assertActive(job, active);
-        context = this.contextFor(job, active, weather);
-        const prompt = `小爱定时播报。北京时间 ${job.date} ${job.time}。按时段和当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。${plan.weather ? "天气由网关附在问候之后，请勿自行提及天气。" : "本次只说问候。"}先直接调用 mcp__qq_gateway__read_home_devices 核实发言入口，再直接调用 mcp__qq_gateway__speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
+        context = this.contextFor(job, active, weather, speakerId);
+        const prompt = `小爱定时播报。北京时间 ${job.date} ${job.time}。按时段和当前人格想一句简短自然的问候，只在小爱播报一次，不向 QQ 发送，也不读取聊天。${includeWeather ? "天气由网关附在问候之后，请勿自行提及天气。" : "本次只说问候。"}先直接调用 mcp__qq_gateway__read_home_devices 核实发言入口，再直接调用 mcp__qq_gateway__speak_home_speaker。request_message_id=${job.id}。最终文字不会自动播报。`;
         const result = await runTurn(prompt, { trigger: "speaker-greeting", qqToolContext: context });
         if (context.error) throw context.error;
         if (active.cancelRequested || result?.cancelled || result?.status === "cancelled") throw cancelled();

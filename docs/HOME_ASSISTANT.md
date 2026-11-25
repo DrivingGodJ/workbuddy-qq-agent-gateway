@@ -5,21 +5,21 @@ WorkBuddy 使用既有 `qq_gateway` MCP 中的 `read_home_devices`、`control_ho
 ## 配置
 
 1. 在 HA 用户安全设置创建一枚专用长期访问令牌，保管好并定期轮换。不要将账号密码或令牌放入源码、提示词、日志或 Git。
-2. macOS 将令牌保存为钥匙串通用密码：服务使用 `CODEX_REMOTE_CONTACT_KEYCHAIN_SERVICE` 的值（默认 `Codex Remote Contact QQ`），账户为 `home-assistant-api-token`。启动脚本读取它；非 macOS 部署可通过安全的进程环境注入 `CODEX_REMOTE_CONTACT_HA_TOKEN`。
+2. macOS 将令牌保存为钥匙串通用密码：服务使用 `WORKBUDDY_QQ_KEYCHAIN_SERVICE` 的值（默认 `WorkBuddy QQ Gateway`），账户为 `home-assistant-api-token`。启动脚本读取它；非 macOS 部署可通过安全的进程环境注入 `WORKBUDDY_QQ_HA_TOKEN`。
 3. 在忽略上传的 `config/qq-only.env` 设置：
 
 ```dotenv
-CODEX_REMOTE_CONTACT_HA_ENABLED=1
-CODEX_REMOTE_CONTACT_HA_BASE_URL=http://homeassistant.local:8123
+WORKBUDDY_QQ_HA_ENABLED=1
+WORKBUDDY_QQ_HA_BASE_URL=http://homeassistant.local:8123
 # 按钮可能执行任意设备操作，只有明确列出的安全实体可按下。
-CODEX_REMOTE_CONTACT_HA_ALLOWED_BUTTONS=button.your_ir_ac_on,button.your_ir_ac_off
+WORKBUDDY_QQ_HA_ALLOWED_BUTTONS=button.your_ir_ac_on,button.your_ir_ac_off
 # 仅支持 Xiaomi 播放文本实体，不允许 execute_text_directive。
-CODEX_REMOTE_CONTACT_HA_ALLOWED_SPEAKERS=notify.xiaomi_your_device_play_text_a_5_3
+WORKBUDDY_QQ_HA_ALLOWED_SPEAKERS=notify.xiaomi_your_device_play_text_a_5_3
 # 可选天气地点。填写城市名和市区的纬度、经度。
-CODEX_REMOTE_CONTACT_SPEAKER_WEATHER_LOCATION="城市名,31.2,121.5"
+WORKBUDDY_QQ_SPEAKER_WEATHER_LOCATION="城市名,31.2,121.5"
 ```
 
-4. 重启网关。真实地址、实体 ID 与访问令牌均不应提交到公开仓库。关闭功能可设 `CODEX_REMOTE_CONTACT_HA_ENABLED=0`；不会删除 HA 设备或 QQ 消息。
+4. 重启网关。真实地址、实体 ID 与访问令牌均不应提交到公开仓库。关闭功能可设 `WORKBUDDY_QQ_HA_ENABLED=0`；不会删除 HA 设备或 QQ 消息。
 
 ## 使用与权限
 

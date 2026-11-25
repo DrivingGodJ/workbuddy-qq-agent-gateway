@@ -2,22 +2,32 @@ import { conversationStatus, isSpeakerGreetingBusy, speakerGreetingStatus } from
 const HUB = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:3789";
 const els = Object.fromEntries([
   "deleteTargetButton", "deleteTargetHint", "deleteTargetDialog", "deleteTargetForm", "deleteTargetName", "deleteTargetStatus", "cancelDeleteTargetButton", "confirmDeleteTargetButton",
-  "toggleNavigationButton", "globalSettingsButton", "settingsButton", "settingsDrawer", "closeSettingsButton", "settingsTargetName", "conversationSettingsBody", "globalSettingsBody", "diagnosticsDetails", "usageSummary", "turnInputPreview", "refreshInputButton", "conversationSearch",
+  "conversationsTabButton", "toggleNavigationButton", "returnToChatButton", "closeInspectorButton", "globalSettingsButton", "settingsButton", "settingsButtonLabel", "headerResetButton", "headerDeleteButton",
+  "topActions", "globalControls", "mobileGlobalControls", "mobileReplyControls",
+  "conversationInspector", "inspectorEmptyState", "inspectorTabBtnConfig", "inspectorTabBtnSubscriptions", "inspectorTabBtnSession", "inspectorTabBtnDiagnostics",
+  "inspectorPaneConfig", "inspectorPaneSubscriptions", "inspectorPaneSession", "inspectorPaneDiagnostics",
+  "settingsDrawer", "closeSettingsButton", "settingsTargetName", "globalSettingsBody", "storageSettingsBody", "settingsTabBtnGlobal", "settingsTabBtnStorage",
+  "storageSummaryCards", "storagePolicyNote", "refreshStorageButton", "cleanupStorageButton", "storageActionStatus",
+  "diagnosticsDetails", "usageSummary", "turnInputPreview", "refreshInputButton", "conversationSearch",
   "stickerLibraryButton", "stickerBlacklistButton", "stickerLibraryCount", "stickerBlacklistCount", "stickerLibraryHelp", "stickerBlacklistTools", "cleanStickerBlacklistFilesButton",
-  "connectionBadge", "refreshButton", "agentDispatchToggle", "agentDispatchLabel", "qzoneButton", "stickerGalleryButton", "stickerGalleryButtonCount",
-  "workspace", "qzonePanel", "closeQzoneButton", "qzoneBanner", "qzoneForm", "qzoneTarget", "qzoneAutoPost", "qzonePostTimes", "qzoneAutoEngage", "qzoneLastSeenTime", "saveQzoneButton", "qzoneSaveStatus", "qzoneEvents", "stickerGallery", "closeStickerGalleryButton", "stickerReadyCount", "stickerRecognizingCount", "stickerCommitCount", "stickerGalleryModel", "stickerRecognitionStatus", "stickerGalleryActionStatus", "stickerGalleryGrid",
+  "connectionBadge", "lanLogoutButton", "refreshButton", "agentDispatchToggle", "agentDispatchLabel", "qzoneButton", "stickerGalleryButton", "stickerGalleryButtonCount",
+  "workspace", "qzonePanel", "qzoneBanner", "qzoneTodayHeading", "qzoneTodaySubtitle", "qzoneFilterAll", "qzoneFilterBot", "qzoneFilterBotPosts", "refreshQzoneTodayButton", "qzoneTodayStatus", "qzoneTodayFeeds", "qzoneForm", "qzoneTarget", "qzoneAutoPost", "qzonePostTimes", "qzoneAutoEngage", "qzoneLastSeenTime", "saveQzoneButton", "qzoneSaveStatus", "qzoneEvents",
+  "stickerGallery", "stickerReadyCount", "stickerRecognizingCount", "stickerCommitCount", "stickerGalleryModel", "stickerRecognitionStatus", "stickerGalleryActionStatus", "stickerGalleryGrid",
   "groupCount", "agentGroupCount", "sourceCount", "groupList", "privateList", "sourceList",
   "addGroupButton", "groupForm", "groupCandidate", "groupFormStatus", "reloadGroupCandidatesButton", "saveGroupButton", "cancelGroupButton",
-  "addPrivateButton", "privateForm", "privateUserId", "privateDisplayName", "privateFormStatus", "savePrivateButton", "cancelPrivateButton",
-  "hubStatus", "oneBotStatus", "codexStatus", "sessionDetails", "subscriptionDetails", "subscriptionCount", "subscriptionList",
+  "addPrivateButton", "privateForm", "privateFriendCandidate", "reloadFriendCandidatesButton", "privateUserId", "privateDisplayName", "privateFormStatus", "savePrivateButton", "cancelPrivateButton",
+  "hubStatus", "oneBotStatus", "engineStatus", "sessionDetails", "subscriptionDetails", "subscriptionCount", "subscriptionList",
   "agentSettingsDetails", "agentSettingsSummary", "agentSettingsForm", "agentModel", "agentReasoningEffort",
   "contextLinkForm", "contextLinkGroup", "contextLinkHint", "contextLinkStatus", "saveContextLinkButton", "sharedContextInfo",
-  "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission", "agentModeExplanation",
+  "agentContextTokenLimit", "agentPermissionMode", "agentCalendarRemindersEnabled", "agentHomeAssistantPermission",
+  "groupAdminPermissions", "groupBotRoleBadge", "agentGroupEssenceEnabled", "agentGroupMuteEnabled", "groupAdminPermissionsHint",
+  "agentModeExplanation",
   "speakerGreetingSettings", "speakerGreetingRows", "addSpeakerGreetingButton", "speakerGreetingsHint",
   "agentSettingsHint", "agentSettingsStatus", "saveAgentSettingsButton",
   "personaDetails", "personaSummary", "personaPromptPreview",
   "personaNameForm", "personaNameInput", "personaNameStatus", "savePersonaNameButton",
   "personaCatchphraseForm", "personaCatchphraseRows", "personaCatchphraseStatus", "personaCatchphraseSaveStatus", "addPersonaCatchphraseButton", "savePersonaCatchphraseButton",
+  "personaPortabilityBadge", "exportPersonaButton", "importPersonaButton", "resetPersonaButton", "importPersonaFileInput", "personaPortabilityStatus",
   "stickerLabelDetails", "stickerLabelSummary", "stickerLabelForm", "stickerLabelModel", "stickerLabelStatus", "saveStickerLabelButton",
   "addSubscriptionButton", "subscriptionForm", "subscriptionId", "subscriptionSource", "subscriptionIntake",
   "subscriptionDelayLabel", "subscriptionDelay", "subscriptionEnabled", "cancelSubscriptionButton",
@@ -26,12 +36,13 @@ const els = Object.fromEntries([
   "resetButton", "cancelButton", "replyControl", "replyEnabledToggle", "replyEnabledLabel", "replyEnabledHint", "conversation", "jumpToLatest", "composer", "promptInput", "sendButton"
 ].map((id) => [id, document.getElementById(id)]));
 
-for (const id of ["sessionDetails", "agentSettingsDetails", "subscriptionDetails"]) els.conversationSettingsBody.append(els[id]);
-for (const id of ["personaDetails", "stickerLabelDetails"]) els.globalSettingsBody.append(els[id]);
-
 let state = null;
 let maintenance = null;
-let selectedKey = localStorage.getItem("crc-selected-target") || "";
+let qqLoginStatus;
+let selectedKey = localStorage.getItem("wbqq-selected-target") || "";
+const phoneLayout = window.matchMedia("(max-width: 780px)");
+const narrowLayout = window.matchMedia("(max-width: 1120px)");
+els.workspace.dataset.mobilePane = selectedKey ? "chat" : "list";
 let stream = null;
 let refreshTimer = null;
 let renderedKey = "";
@@ -51,6 +62,13 @@ let stickerEditingId = "";
 let stickerEditDraft = "";
 let stickerActionSavingId = "";
 let qzoneDirty = false;
+let qzoneTodayFilter = "all";
+let qzoneRefreshing = false;
+let settingsActiveTab = "global";
+let inspectorActiveTab = "config";
+let inspectorCollapsed = localStorage.getItem("wbqq-inspector-collapsed") === "1";
+let storageReport = null;
+let storageBusy = false;
 let personaNameDirty = false;
 let personaCatchphraseDirty = false;
 let personaCatchphraseSignature = "";
@@ -61,8 +79,25 @@ let deletingTarget = null;
 let deleteTargetSaving = false;
 const scrollState = new Map();
 
+let lanMode = false;
+
+async function checkLanSession() {
+  try {
+    const res = await fetch(`${HUB}/api/lan-auth/status`, { cache: "no-store" });
+    if (!res.ok) return true;
+    const info = await res.json();
+    lanMode = Boolean(info.lanMode);
+    if (lanMode && !info.authenticated) {
+      location.replace("/login.html");
+      return false;
+    }
+    if (els.lanLogoutButton) els.lanLogoutButton.hidden = !lanMode;
+  } catch {}
+  return true;
+}
+
 async function api(path, options = {}) {
-  const token = localStorage.getItem("crc-hub-token") || "";
+  const token = lanMode ? "" : (localStorage.getItem("wbqq-hub-token") || "");
   const response = await fetch(`${HUB}${path}`, {
     ...options,
     headers: {
@@ -71,15 +106,18 @@ async function api(path, options = {}) {
       ...(options.headers || {})
     }
   });
+  if (response.status === 401 && lanMode) {
+    location.replace("/login.html");
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
   return body;
 }
 
-async function refresh() {
+async function refresh({ forceMetadata = false } = {}) {
   setConnection("正在连接", "neutral");
   try {
-    [state, maintenance] = await Promise.all([api("/api/state"), api("/api/maintenance")]);
+    [state, maintenance] = await Promise.all([api(forceMetadata ? "/api/state?refresh=1" : "/api/state"), api("/api/maintenance")]);
     render();
     setConnection("已连接", "good");
   } catch (error) {
@@ -95,7 +133,7 @@ function render() {
     selectedKey = all[0]?.key || "";
     conversationSignature = "";
   }
-  localStorage.setItem("crc-selected-target", selectedKey);
+  localStorage.setItem("wbqq-selected-target", selectedKey);
   renderNavigation(all);
   renderServices();
   const selected = all.find((item) => item.key === selectedKey) || null;
@@ -111,18 +149,24 @@ function render() {
   renderDiagnostics(selected);
 }
 
-function agentName() { return state?.persona?.name || "老代"; }
+function agentName() { return state?.persona?.name || "机器人"; }
 
 function renderView() {
   const galleryOpen = location.hash === "#stickers";
   const qzoneOpen = location.hash === "#qzone";
-  els.workspace.hidden = galleryOpen || qzoneOpen;
+  const conversationsOpen = !galleryOpen && !qzoneOpen;
+  els.workspace.hidden = !conversationsOpen;
   els.stickerGallery.hidden = !galleryOpen;
   els.qzonePanel.hidden = !qzoneOpen;
-  els.stickerGalleryButton.setAttribute("aria-pressed", String(galleryOpen));
-  els.stickerGalleryButton.classList.toggle("selected", galleryOpen);
-  els.qzoneButton.setAttribute("aria-pressed", String(qzoneOpen));
+  if (els.conversationsTabButton) {
+    els.conversationsTabButton.setAttribute("aria-selected", String(conversationsOpen));
+    els.conversationsTabButton.classList.toggle("selected", conversationsOpen);
+  }
+  els.qzoneButton.setAttribute("aria-selected", String(qzoneOpen));
   els.qzoneButton.classList.toggle("selected", qzoneOpen);
+  els.stickerGalleryButton.setAttribute("aria-selected", String(galleryOpen));
+  els.stickerGalleryButton.classList.toggle("selected", galleryOpen);
+  applyInspectorState();
 }
 
 function renderQzone() {
@@ -143,8 +187,76 @@ function renderQzone() {
   els.qzoneBanner.className = `recognition-status ${enabled ? "active" : "waiting"}`;
   els.qzonePostTimes.textContent = `沿用现有早中晚时间：${(config.scheduleTimes || []).join("、") || "未配置"}（北京时间）。每个时段可自行跳过。`;
   els.qzoneLastSeenTime.textContent = `上次读到的最新动态发布时间：${config.lastSeenFeedTimeMs ? formatTime(config.lastSeenFeedTimeMs) : "尚无"}。新动态按发布时间判断；同一秒内按记录去重。`;
+
+  renderQzoneTodayFeeds(config);
+
   const events = (config.events || []).slice(0, 15);
   els.qzoneEvents.innerHTML = events.length ? events.map((event) => `<article><span>${escapeHtml(formatTime(event.at))} · ${escapeHtml(({"scheduled-post":"定时发动态",post:"手动发动态","feed-scan":"好友动态检查",like:"点赞",comment:"评论",error:"错误"})[event.kind] || event.kind)}</span><strong>${escapeHtml(event.message || event.status || "")}</strong></article>`).join("") : '<p class="empty compact">尚无任务记录。设置默认关闭，保存后才开始运行。</p>';
+}
+
+function renderQzoneTodayFeeds(config) {
+  const feeds = Array.isArray(config.todayFeeds) ? config.todayFeeds : [];
+  const todayLabel = config.todayDate || "今日";
+  if (els.qzoneTodayHeading) {
+    els.qzoneTodayHeading.textContent = `今日动态与评论（${todayLabel} · ${feeds.length} 条）`;
+  }
+  for (const [btn, key] of [
+    [els.qzoneFilterAll, "all"],
+    [els.qzoneFilterBot, "engaged"],
+    [els.qzoneFilterBotPosts, "posts"]
+  ]) {
+    if (btn) btn.classList.toggle("selected", qzoneTodayFilter === key);
+  }
+  const filtered = feeds.filter((feed) => {
+    if (qzoneTodayFilter === "posts") return Boolean(feed.isBotPost);
+    if (qzoneTodayFilter === "engaged") return Boolean(feed.botLiked || feed.isBotPost || (feed.comments || []).some((c) => c.isBot));
+    return true;
+  });
+  if (!els.qzoneTodayFeeds) return;
+  if (!filtered.length) {
+    els.qzoneTodayFeeds.innerHTML = `<p class="empty compact">${feeds.length ? "当前筛选条件下没有匹配动态。" : "今日暂无动态，点击「刷新动态」查看。"}</p>`;
+    return;
+  }
+  els.qzoneTodayFeeds.innerHTML = filtered.map((feed) => {
+    const comments = Array.isArray(feed.comments) ? feed.comments : [];
+    const botCommented = comments.some((comment) => comment.isBot);
+    const badges = [
+      feed.isBotPost ? `<span class="qzone-pill bot">${escapeHtml(agentName())}发布</span>` : "",
+      feed.botLiked ? `<span class="qzone-pill liked">${escapeHtml(agentName())}已赞</span>` : "",
+      botCommented ? `<span class="qzone-pill bot">${escapeHtml(agentName())}已评</span>` : ""
+    ].filter(Boolean).join("");
+    const metaBadges = [
+      feed.imageCount > 0 ? `<span class="qzone-meta-chip">含 ${Number(feed.imageCount)} 张图</span>` : "",
+      `<span class="qzone-meta-chip">♥ ${Number(feed.likeCount || 0)}</span>`,
+      `<span class="qzone-meta-chip">💬 ${comments.length}</span>`
+    ].filter(Boolean).join("");
+    const commentHtml = comments.length
+      ? `<ul class="qzone-comment-list">${comments.map((comment) => `
+          <li class="qzone-comment ${comment.isBot ? "qzone-comment-bot" : ""}">
+            <div class="qzone-comment-head">
+              <strong>${escapeHtml(comment.nickname || comment.uin || "好友")}</strong>
+              ${comment.isBot ? `<span class="qzone-pill bot">${escapeHtml(agentName())}评论</span>` : ""}
+              ${comment.timeText ? `<span class="qzone-comment-time">${escapeHtml(comment.timeText)}</span>` : ""}
+            </div>
+            <p class="qzone-comment-body">${escapeHtml(comment.content)}</p>
+          </li>`).join("")}</ul>`
+      : '<p class="qzone-no-comments">暂无评论</p>';
+    return `
+      <article class="qzone-feed-card">
+        <header class="qzone-feed-head">
+          <div class="qzone-feed-author">
+            <strong>${escapeHtml(feed.nickname || feed.uin)}</strong>
+            <span class="qzone-feed-uin">(${escapeHtml(feed.uin)})</span>
+            ${badges}
+          </div>
+          <time class="qzone-feed-time">${escapeHtml(formatTime(feed.timeMs))}</time>
+        </header>
+        <p class="qzone-feed-text">${escapeHtml(feed.text || "（仅图片或无正文内容）")}</p>
+        <div class="qzone-feed-stats">${metaBadges}</div>
+        ${commentHtml}
+      </article>
+    `;
+  }).join("");
 }
 
 function renderStickerGallery() {
@@ -257,7 +369,7 @@ function stickerTimestamp(item) {
 }
 
 function stickerImageUrl(id, version) {
-  const token = localStorage.getItem("crc-hub-token") || "";
+  const token = localStorage.getItem("wbqq-hub-token") || "";
   const parameters = new URLSearchParams();
   if (version) parameters.set("v", String(version));
   if (token) parameters.set("access_token", token);
@@ -274,6 +386,13 @@ function allItems() {
   ];
 }
 
+function isItemBusy(item) {
+  const data = item?.data || null;
+  if (!data || item.kind === "source") return false;
+  const active = getActiveReply(data);
+  return Boolean(data.busy || active.running || data.qzoneActivity || isSpeakerGreetingBusy(data));
+}
+
 function renderNavigation(all) {
   const query = els.conversationSearch.value.trim().toLowerCase();
   const visible = all.filter((item) => !query || `${itemName(item)} ${item.data.targetId || item.data.groupId}`.toLowerCase().includes(query));
@@ -283,7 +402,7 @@ function renderNavigation(all) {
   els.groupCount.textContent = String(all.length);
   els.agentGroupCount.textContent = String(groups.length);
   els.sourceCount.textContent = String(sources.length);
-  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.speakerGreetingActivity, item.data.contextLink, item.data.contextQueue, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
+  const signature = JSON.stringify([query, state?.agentDispatch?.enabled, visible.map((item) => [item.key, itemName(item), item.data.busy, item.data.replyEnabled, item.data.pendingCount, item.data.retainedCount, item.data.visibleCount, item.data.pendingSubscriberCount, item.data.failedSubscriberCount, item.data.activeReply?.running, item.data.activeReply?.status, item.data.diagnostics?.stage, item.data.qzoneActivity, item.data.speakerGreetingActivity, item.data.contextLink, item.data.contextQueue, item.data.threadLock?.status, item.data.subscriptions?.length, item.key === selectedKey])]);
   if (signature === navigationSignature) return;
   navigationSignature = signature;
   els.groupList.innerHTML = groups.length ? groups.map(renderNavigationButton).join("") : `<p class="empty compact">${query ? "没有匹配群聊" : "尚未配置 Agent 群"}</p>`;
@@ -329,11 +448,21 @@ function renderNavigationButton(item) {
   }
   if (item.kind !== "source") ({ short: status, tone } = conversationStatus(data, state));
   const subtitle = item.kind === "group" ? `群 ${data.targetId}` : item.kind === "private" ? `私聊 ${data.targetId}` : `来源群 ${data.groupId}`;
-  return `
+  const rowButton = `
     <button class="group-button ${selected ? "selected" : ""}" type="button" data-target-key="${escapeHtml(item.key)}" ${selected ? 'aria-current="true"' : ""}>
       <span class="group-copy"><strong>${escapeHtml(itemName(item))}</strong><small>${escapeHtml(subtitle)}</small></span>
       <span class="group-status ${tone}">${escapeHtml(status)}</span>
     </button>`;
+  if (item.kind === "source") return rowButton;
+  const busyOrLinked = isItemBusy(item) || Boolean(data.contextLink);
+  const deleteTitle = data.contextLink ? "请先解除共享上下文关联，再删除会话" : isItemBusy(item) ? "会话运行中，暂不可删除" : "删除会话并清理工作目录与记录";
+  return `
+    <div class="group-row ${selected ? "selected" : ""}">
+      ${rowButton}
+      <button class="row-delete-btn" type="button" data-delete-target-key="${escapeHtml(item.key)}" title="${escapeHtml(deleteTitle)}" aria-label="删除 ${escapeHtml(itemName(item))}" ${busyOrLinked ? "disabled" : ""}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m-1 0v14H9V6h6Z" /></svg>
+      </button>
+    </div>`;
 }
 
 function qzoneActivityShort(activity) {
@@ -358,34 +487,77 @@ function renderServices() {
   els.agentDispatchToggle.checked = dispatchEnabled;
   els.agentDispatchLabel.textContent = dispatchEnabled ? "Agent 已开启" : "Agent 已暂停";
   els.hubStatus.textContent = maintenance?.hub ? "运行中" : "未知";
-  els.oneBotStatus.textContent = maintenance?.oneBot?.ok ? `${maintenance.oneBot.login?.nickname || "QQ"} 在线` : (maintenance?.oneBot?.error || "离线");
+  renderQQLoginStatus();
   const active = state?.qq?.activeTargets || [];
-  els.codexStatus.textContent = !dispatchEnabled ? "已暂停 · 仅记录消息" : active.length ? `${active.length} 个会话处理中` : "空闲";
+  els.engineStatus.textContent = !dispatchEnabled ? "已暂停 · 仅记录消息" : active.length ? `${active.length} 个会话处理中` : "空闲";
+}
+
+function renderQQLoginStatus() {
+  const status = qqLoginStatus ?? maintenance?.oneBot;
+  els.oneBotStatus.textContent = status?.ok ? `${status.login?.nickname || "QQ"} 在线` : (status?.error || "离线");
+}
+
+async function pollQQLoginStatus() {
+  try {
+    qqLoginStatus = await api("/api/qq/login-status", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+  } catch {
+    qqLoginStatus = { ok: false };
+  }
+  renderQQLoginStatus();
+  setTimeout(pollQQLoginStatus, document.hidden || qqLoginStatus.ok ? 10000 : 2000);
 }
 
 function renderSelected(item) {
   const data = item?.data || null;
   const source = item?.kind === "source";
+  const editableTarget = Boolean(item && !source);
   const active = source ? { running: false } : getActiveReply(data);
+  const busy = isItemBusy(item);
   const replyEnabled = data?.replyEnabled !== false;
-  els.replyControl.hidden = !item || source;
+  els.returnToChatButton.hidden = !item;
+  els.settingsButton.disabled = !item;
+  els.replyControl.hidden = !editableTarget;
   els.replyEnabledToggle.checked = replyEnabled;
   els.replyEnabledToggle.disabled = replySwitchSaving;
   els.replyEnabledLabel.textContent = replyEnabled ? "允许回复" : "不回复";
   els.replyEnabledHint.textContent = !replyEnabled ? "消息继续记录" : state?.agentDispatch?.enabled === false ? "总开关已暂停" : "仅影响当前会话";
-  els.sessionDetails.hidden = !item || source;
-  els.deleteTargetButton.disabled = !item || source || Boolean(data?.busy || active.running || data?.qzoneActivity || isSpeakerGreetingBusy(data));
-  els.deleteTargetHint.textContent = data?.busy || active.running || data?.qzoneActivity || isSpeakerGreetingBusy(data)
+  if (els.headerResetButton) {
+    els.headerResetButton.hidden = !editableTarget;
+    els.headerResetButton.disabled = !editableTarget || busy || Boolean(data?.contextLink);
+    els.headerResetButton.title = data?.contextLink ? "请先解除共享上下文关联，再新建独立私聊会话" : "清空当前会话工作目录、聊天记录与上下文并新建会话";
+  }
+  if (els.headerDeleteButton) {
+    els.headerDeleteButton.hidden = !editableTarget;
+    els.headerDeleteButton.disabled = !editableTarget || busy || Boolean(data?.contextLink);
+    els.headerDeleteButton.title = data?.contextLink ? "请先解除共享上下文关联，再删除会话" : busy ? "会话运行中，暂不可删除" : "删除会话并清理工作目录与记录";
+  }
+  els.sessionDetails.hidden = !editableTarget;
+  els.deleteTargetButton.disabled = !editableTarget || busy || Boolean(data?.contextLink);
+  els.deleteTargetHint.textContent = busy
     ? "请先终止或等待当前任务完成，再删除会话。"
-    : "移出白名单、解除订阅并归档本地状态，不退群、不删好友。";
-  els.agentSettingsDetails.hidden = !item || source;
+    : data?.contextLink
+      ? "请先在「参数」页解除共享上下文关联，再删除此会话。"
+      : "移出白名单，彻底清理工作目录、聊天记录、缓存媒体与 WorkBuddy 历史，不退群、不删好友。";
+  els.agentSettingsDetails.hidden = !editableTarget;
   els.personaDetails.hidden = false;
-  els.subscriptionDetails.hidden = !item || source;
+  els.subscriptionDetails.hidden = !editableTarget;
+  if (els.inspectorEmptyState) {
+    els.inspectorEmptyState.hidden = editableTarget;
+    if (source) {
+      els.inspectorEmptyState.textContent = "只读通知源展示通知和订阅投递进度。会话参数与订阅设置位于对应群聊或私聊的详情。";
+    } else {
+      els.inspectorEmptyState.textContent = "请从会话列表选择一个群聊或私聊。";
+    }
+  }
+  for (const btn of [els.inspectorTabBtnConfig, els.inspectorTabBtnSubscriptions, els.inspectorTabBtnSession, els.inspectorTabBtnDiagnostics]) {
+    if (btn) btn.disabled = !editableTarget;
+  }
+  setInspectorTab(inspectorActiveTab, { fetchDiagnostics: false, activeTarget: editableTarget });
   const effectiveThreadId = data?.contextLink?.threadId || data?.threadId;
   els.threadId.textContent = source ? "只读来源" : (effectiveThreadId || "尚未创建");
   els.threadId.title = data?.contextLink ? `共享群聊会话；搁置的私聊：${data.contextLink.parkedThreadId || "尚未创建"}` : effectiveThreadId || "";
-  els.resetButton.disabled = Boolean(data?.contextLink);
-  els.resetButton.title = data?.contextLink ? "先解除上下文关联，再新建独立私聊会话；群聊会话请在群聊设置中操作。" : "";
+  els.resetButton.disabled = !editableTarget || busy || Boolean(data?.contextLink);
+  els.resetButton.title = data?.contextLink ? "先解除上下文关联，再新建独立私聊会话；群聊会话请在群聊设置中操作。" : "清空当前会话工作目录、聊天记录与上下文并新建会话";
   els.threadLockState.textContent = source ? "不适用" : formatThreadLock(data?.threadLock);
   els.threadLockState.title = data?.threadLock?.error || "";
   els.threadCreatedAt.textContent = source ? "—" : formatTime(data?.threadCreatedAt);
@@ -419,11 +591,11 @@ function renderSelected(item) {
   els.composer.hidden = source || !item;
   els.sendButton.disabled = !item || source;
   els.promptInput.disabled = !item || source;
-  if (item && !source) els.promptInput.placeholder = item.kind === "private" ? "以 OWNER 身份发起这段私聊 Agent 对话……" : "以 OWNER 身份向当前群发起 Agent 对话……";
+  if (editableTarget) setComposerPlaceholder(item);
 }
 
 function renderDiagnostics(item) {
-  els.settingsTargetName.textContent = item ? `当前：${itemName(item)}${item.kind === "source" ? " · 只读来源" : ""}` : "尚未选择会话";
+  els.settingsTargetName.textContent = item ? `${itemName(item)}${item.kind === "source" ? " · 只读来源" : ""}` : "当前会话操作栏";
   els.diagnosticsDetails.hidden = !item || item.kind === "source";
   const data = item?.data?.diagnostics;
   const number = (value) => Number.isFinite(value) ? value.toLocaleString() : "未提供";
@@ -442,7 +614,9 @@ function renderDiagnostics(item) {
     els.turnInputPreview.textContent = data?.stage === "complete"
       ? "本轮已正常完成，输入正文已清理；会话上下文由 WorkBuddy 保存。"
       : "运行期间可查看本轮提交内容；正常完成后立即清理，不积累聊天历史。";
-    if (els.diagnosticsDetails.open && els.settingsDrawer.open) loadInputPreview();
+    if (inspectorActiveTab === "diagnostics" && isInspectorVisible() && item && item.kind !== "source") {
+      loadInputPreview();
+    }
   }
 }
 
@@ -466,7 +640,7 @@ function renderAgentSettings(item) {
   if (!item || item.kind === "source") return;
   const data = item.data;
   renderContextLink(item);
-  const config = data.codexConfig || {
+  const config = data.agentConfig || {
     model: state?.ai?.model,
     reasoningEffort: state?.ai?.reasoningEffort,
     contextTokenLimit: state?.ai?.autoCompactTokenLimit,
@@ -476,10 +650,10 @@ function renderAgentSettings(item) {
     homeAssistantPermission: "owner",
     speakerGreetings: []
   };
-  const modelConfig = data.contextLink ? data.effectiveCodexConfig || config : config;
+  const modelConfig = data.contextLink ? data.effectiveAgentConfig || config : config;
   const model = modelInfo(modelConfig.model);
   els.agentSettingsSummary.textContent = `${data.contextLink ? "共享群 · " : ""}${permissionModeLabel(config.permissionMode)} · ${model?.displayName || modelConfig.model || "默认"} · ${effortLabel(modelConfig.reasoningEffort)} · 自动化${config.calendarRemindersEnabled === false ? "关" : "开"}`;
-  const nextSignature = JSON.stringify([item.key, config, modelConfig, data.contextLink, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions]);
+  const nextSignature = JSON.stringify([item.key, config, modelConfig, data.contextLink, data.botRole, data.isBotGroupAdmin, state?.ai?.availableModels, state?.ai?.contextTokenOptions, state?.ai?.permissionModeOptions, state?.ai?.homeAssistantPermissionOptions]);
   const nextContextKey = `${item.key}:${data.contextLink?.groupId || ""}`;
   if ((!settingsDirty || settingsContextKey !== nextContextKey) && settingsSignature !== nextSignature) {
     populateModelOptions(modelConfig.model);
@@ -491,6 +665,8 @@ function renderAgentSettings(item) {
     populatePermissionOptions(config.permissionMode, item.kind);
     els.agentCalendarRemindersEnabled.checked = config.calendarRemindersEnabled !== false;
     populateHomeAssistantPermissionOptions(config.homeAssistantPermission || "owner", item.kind);
+    els.agentGroupEssenceEnabled.checked = config.groupEssenceEnabled === true;
+    els.agentGroupMuteEnabled.checked = config.groupMuteEnabled === true;
     els.speakerGreetingRows.replaceChildren();
     for (const plan of config.speakerGreetings || []) appendSpeakerGreetingRow(plan);
     settingsSignature = nextSignature;
@@ -501,7 +677,21 @@ function renderAgentSettings(item) {
   els.agentPermissionMode.disabled = busy;
   els.agentCalendarRemindersEnabled.disabled = busy;
   els.agentHomeAssistantPermission.disabled = busy;
-  const greetingAvailable = state?.ai?.speakerGreetingsAvailable === true;
+  const isGroupTarget = item.kind === "group";
+  els.groupAdminPermissions.hidden = !isGroupTarget;
+  if (isGroupTarget) {
+    const botIsAdmin = data.isBotGroupAdmin === true || data.botRole === "admin" || data.botRole === "owner";
+    els.groupBotRoleBadge.textContent = data.botRole === "owner" ? "群主"
+      : data.botRole === "admin" ? "管理员"
+      : data.botRole === "member" ? "普通成员"
+      : "未检测";
+    els.agentGroupEssenceEnabled.disabled = busy || (!botIsAdmin && !els.agentGroupEssenceEnabled.checked);
+    els.agentGroupMuteEnabled.disabled = busy || (!botIsAdmin && !els.agentGroupMuteEnabled.checked);
+    els.groupAdminPermissionsHint.textContent = botIsAdmin
+      ? "机器人已是本群管理员；开启后将自动写入系统提示词，引导机器人按需设精华或对违反公序良俗的成员酌情禁言。"
+      : "当前机器人不是本群管理员，无法开启群管自主权限；在 QQ 设为管理员后刷新即可解锁。";
+  }
+  const greetingAvailable = maintenance?.homeAssistant?.speakerReady ?? (state?.ai?.speakerGreetingsAvailable === true);
   const homeEnabled = els.agentHomeAssistantPermission.value !== "disabled";
   els.speakerGreetingSettings.disabled = busy;
   for (const toggle of els.speakerGreetingRows.querySelectorAll(".greeting-enabled")) {
@@ -601,6 +791,12 @@ function renderPersona(item) {
   els.savePersonaCatchphraseButton.disabled = !personaCatchphraseDirty;
   els.addPersonaCatchphraseButton.disabled = els.personaCatchphraseRows.querySelectorAll(".persona-catchphrase-row").length >= 20;
   els.personaPromptPreview.textContent = persona.promptPreview || "—";
+  if (els.personaPortabilityBadge) {
+    els.personaPortabilityBadge.textContent = persona.isImported ? "已导入人格" : "基础配置";
+  }
+  if (els.resetPersonaButton) {
+    els.resetPersonaButton.hidden = !persona.isImported;
+  }
 }
 
 function catchphraseRow(entry = { text: "", when: "" }, index = 0) {
@@ -688,7 +884,10 @@ function updateParameterExplanation(item) {
     `<p><strong>${escapeHtml(permission?.label || "执行权限")}</strong>${escapeHtml(permission?.description || "")}${escapeHtml(permissionWarning)}</p>`,
     `<p><strong>${escapeHtml(effortLabel(els.agentReasoningEffort.value))} · ${escapeHtml(formatTokenLimit(els.agentContextTokenLimit.value))}</strong>${escapeHtml([effort?.description, context?.description, capabilityNote].filter(Boolean).join("；"))}</p>`,
     `<p><strong>通知自动化${els.agentCalendarRemindersEnabled.checked ? "已开启" : "已关闭"}</strong>${els.agentCalendarRemindersEnabled.checked ? "AUTO 通知可写入指定日历和“待办”提醒列表；写入成功后会在 QQ 回复中确认。" : "AUTO 通知仍会整理并回复，但网关不会执行日历或提醒事项写入。"}</p>`,
-    `<p><strong>家居 · ${escapeHtml(homePermission?.label || "未配置")}</strong>${escapeHtml(homePermission?.description || "请刷新页面加载权限选项。")}</p>`
+    `<p><strong>家居 · ${escapeHtml(homePermission?.label || "未配置")}</strong>${escapeHtml(homePermission?.description || "请刷新页面加载权限选项。")}</p>`,
+    ...(item.kind === "group" ? [
+      `<p><strong>群管权限</strong>设置精华消息${els.agentGroupEssenceEnabled.checked ? "已开启" : "已关闭"}；违规禁言${els.agentGroupMuteEnabled.checked ? "已开启" : "已关闭"}。</p>`
+    ] : [])
   ].join("");
 }
 
@@ -850,7 +1049,12 @@ function openSubscriptionForm(subscription = null) {
   els.subscriptionEnabled.checked = subscription?.enabled !== false;
   els.subscriptionForm.hidden = false;
   els.addSubscriptionButton.hidden = true;
-  els.subscriptionDetails.open = true;
+  if (inspectorCollapsed) {
+    inspectorCollapsed = false;
+    localStorage.setItem("wbqq-inspector-collapsed", "0");
+    applyInspectorState();
+  }
+  setInspectorTab("subscriptions");
 }
 
 function closeSubscriptionForm() {
@@ -863,17 +1067,22 @@ function closeSubscriptionForm() {
 function replaceConversation(html, signature, forceBottom, key = "") {
   const switched = renderedKey !== key;
   const tracker = scrollTracker(key);
-  const followLatest = forceBottom || (switched ? tracker.followLatest : isNearBottom());
-  const savedTop = switched ? tracker.top : els.conversation.scrollTop;
+  const visible = els.conversation.clientHeight > 0;
+  const useSavedScroll = switched || !visible;
+  const followLatest = forceBottom || (useSavedScroll ? tracker.followLatest : isNearBottom());
+  const savedTop = useSavedScroll ? tracker.top : els.conversation.scrollTop;
   els.conversation.innerHTML = html;
   renderedKey = key;
   conversationSignature = signature;
+  tracker.followLatest = followLatest;
+  tracker.hasNewContent = !followLatest;
+  tracker.top = savedTop;
+  if (!visible) return;
   requestAnimationFrame(() => {
+    if (renderedKey !== key || conversationSignature !== signature || !els.conversation.clientHeight) return;
     if (followLatest) scrollToLatest(false);
     else {
       els.conversation.scrollTop = Math.min(savedTop, Math.max(0, els.conversation.scrollHeight - els.conversation.clientHeight));
-      tracker.followLatest = false;
-      tracker.hasNewContent = true;
       updateJumpButton();
     }
   });
@@ -923,11 +1132,21 @@ function scrollTracker(key) {
 }
 
 function rememberCurrentScroll() {
-  if (!renderedKey) return;
+  if (!renderedKey || !els.conversation.clientHeight) return;
   const tracker = scrollTracker(renderedKey);
   tracker.top = els.conversation.scrollTop;
   tracker.followLatest = isNearBottom();
   if (tracker.followLatest) tracker.hasNewContent = false;
+}
+
+function restoreCurrentScroll() {
+  if (!renderedKey || !els.conversation.clientHeight) return;
+  const tracker = scrollTracker(renderedKey);
+  if (tracker.followLatest) scrollToLatest(false);
+  else {
+    els.conversation.scrollTop = tracker.top;
+    updateJumpButton();
+  }
 }
 
 function isNearBottom() {
@@ -959,7 +1178,7 @@ function setConnection(text, tone) {
 
 function connectStream() {
   if (!window.EventSource || stream) return;
-  const token = localStorage.getItem("crc-hub-token") || "";
+  const token = localStorage.getItem("wbqq-hub-token") || "";
   const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
   stream = new EventSource(`${HUB}/api/qq/stream${query}`);
   stream.onopen = () => setConnection("实时连接", "good");
@@ -1001,33 +1220,239 @@ async function postTargetAction(action) {
 }
 
 function selectTarget(key) {
-  els.workspace.classList.remove("nav-open");
-  els.toggleNavigationButton.setAttribute("aria-expanded", "false");
-  if (key === selectedKey) return;
-  rememberCurrentScroll();
-  selectedKey = key;
-  conversationSignature = "";
-  settingsSignature = "";
-  settingsDirty = false;
-  els.agentSettingsStatus.textContent = "";
-  closeSubscriptionForm();
-  localStorage.setItem("crc-selected-target", selectedKey);
-  render();
+  if (key !== selectedKey) {
+    rememberCurrentScroll();
+    selectedKey = key;
+    conversationSignature = "";
+    settingsSignature = "";
+    settingsDirty = false;
+    els.agentSettingsStatus.textContent = "";
+    closeSubscriptionForm();
+    localStorage.setItem("wbqq-selected-target", selectedKey);
+    render();
+  }
+  if (phoneLayout.matches) setMobilePane("chat");
+  else els.workspace.dataset.mobilePane = "chat";
 }
 
-for (const button of [els.settingsButton, els.globalSettingsButton]) button.addEventListener("click", () => {
-  els.settingsDrawer.showModal();
-  if (els.diagnosticsDetails.open) loadInputPreview();
-});
-els.closeSettingsButton.addEventListener("click", () => els.settingsDrawer.close());
-els.deleteTargetButton.addEventListener("click", () => {
+function setSettingsTab(tab) {
+  settingsActiveTab = ["global", "storage"].includes(tab) ? tab : "global";
+  const panes = [
+    ["global", els.settingsTabBtnGlobal, els.globalSettingsBody],
+    ["storage", els.settingsTabBtnStorage, els.storageSettingsBody]
+  ];
+  for (const [key, btn, pane] of panes) {
+    const active = key === settingsActiveTab;
+    if (btn) {
+      btn.classList.toggle("selected", active);
+      btn.setAttribute("aria-selected", String(active));
+    }
+    if (pane) pane.hidden = !active;
+  }
+  if (settingsActiveTab === "storage") {
+    loadStorageUsage();
+  }
+}
+
+function setInspectorTab(tab, { fetchDiagnostics = true, activeTarget = null } = {}) {
+  inspectorActiveTab = ["config", "subscriptions", "session", "diagnostics"].includes(tab) ? tab : "config";
+  const hasTarget = activeTarget != null ? activeTarget : Boolean(currentTarget());
+  const panes = [
+    ["config", els.inspectorTabBtnConfig, els.inspectorPaneConfig],
+    ["subscriptions", els.inspectorTabBtnSubscriptions, els.inspectorPaneSubscriptions],
+    ["session", els.inspectorTabBtnSession, els.inspectorPaneSession],
+    ["diagnostics", els.inspectorTabBtnDiagnostics, els.inspectorPaneDiagnostics]
+  ];
+  for (const [key, btn, pane] of panes) {
+    const active = key === inspectorActiveTab;
+    if (btn) {
+      btn.classList.toggle("selected", active);
+      btn.setAttribute("aria-selected", String(active));
+    }
+    if (pane) pane.hidden = !hasTarget || !active;
+  }
+  if (fetchDiagnostics && hasTarget && inspectorActiveTab === "diagnostics") {
+    loadInputPreview();
+  }
+}
+
+function applyInspectorState() {
+  els.workspace.classList.toggle("inspector-collapsed", inspectorCollapsed);
+  const open = isInspectorVisible();
+  els.settingsButtonLabel.textContent = open ? "收起操作栏" : "打开操作栏";
+  els.settingsButton.setAttribute("aria-expanded", String(open));
+}
+
+function isInspectorVisible() {
+  if (els.workspace.hidden) return false;
+  if (phoneLayout.matches) return els.workspace.dataset.mobilePane === "details";
+  return narrowLayout.matches ? els.workspace.classList.contains("inspector-open") : !inspectorCollapsed;
+}
+
+function setMobilePane(pane) {
+  const previous = els.workspace.dataset.mobilePane;
+  if (previous === pane) return;
+  if (previous === "chat") rememberCurrentScroll();
+  els.workspace.dataset.mobilePane = pane;
+  applyInspectorState();
+  if (pane === "chat") restoreCurrentScroll();
+  const focusTarget = pane === "list" ? document.getElementById("conversationSidebar")
+    : pane === "details" ? els.closeInspectorButton
+    : previous === "details" ? els.settingsButton : els.conversation;
+  focusTarget.focus({ preventScroll: true });
+  if (pane === "details" && inspectorActiveTab === "diagnostics") loadInputPreview();
+}
+
+function applyResponsiveLayout() {
+  const phone = phoneLayout.matches;
+  const globalHost = phone ? els.mobileGlobalControls : els.topActions;
+  if (els.globalControls.parentElement !== globalHost) globalHost.append(els.globalControls);
+  const replyHost = phone ? els.mobileReplyControls : els.settingsButton.parentElement;
+  if (els.replyControl.parentElement !== replyHost) replyHost.prepend(els.replyControl);
+  if (phone) els.workspace.classList.remove("inspector-open");
   const item = currentTarget();
-  if (!item) return;
-  deletingTarget = {type:item.kind,id:String(item.data.targetId),name:itemName(item)};
+  if (item) setComposerPlaceholder(item);
+  applyInspectorState();
+  restoreCurrentScroll();
+}
+
+function setComposerPlaceholder(item) {
+  els.promptInput.placeholder = phoneLayout.matches ? "输入消息…"
+    : item.kind === "private" ? "以 OWNER 身份发起这段私聊 Agent 对话……"
+    : "以 OWNER 身份向当前群发起 Agent 对话……";
+}
+
+function fitMobileViewport() {
+  const viewport = window.visualViewport;
+  const editing = document.activeElement?.matches("textarea, input:not([type=checkbox]):not([type=button])");
+  if (phoneLayout.matches && editing && viewport?.scale === 1 && viewport.height < window.innerHeight - 80) {
+    document.documentElement.style.setProperty("--mobile-viewport-height", `${viewport.height}px`);
+  } else {
+    document.documentElement.style.removeProperty("--mobile-viewport-height");
+  }
+}
+
+function openDeleteTargetDialog(item = currentTarget()) {
+  if (!item || item.kind === "source") return;
+  if (isItemBusy(item) || item.data?.contextLink) return;
+  deletingTarget = { type: item.kind, id: String(item.data.targetId), name: itemName(item) };
   els.deleteTargetName.textContent = `${deletingTarget.name} · ${item.kind === "private" ? "QQ" : "群号"} ${deletingTarget.id}`;
   els.deleteTargetStatus.textContent = "";
   els.deleteTargetDialog.showModal();
+}
+
+function triggerResetConversation(item = currentTarget()) {
+  if (!item || item.kind === "source") return;
+  if (isItemBusy(item) || item.data?.contextLink) return;
+  const warning = `确定新建「${itemName(item)}」的会话？\n\n确认后将删除上一个会话的 WorkBuddy 历史、清空本地聊天记录与缓存媒体，并重置该会话的工作目录，然后初始化全新上下文。`;
+  if (!confirm(warning)) return;
+  const segment = item.kind === "private" ? "private" : "groups";
+  api(`/api/qq/${segment}/${encodeURIComponent(item.data.targetId)}/reset`, { method: "POST", body: "{}" })
+    .then(() => scheduleRefresh())
+    .catch(showError);
+}
+
+function renderStorageUsage() {
+  if (!els.storageSummaryCards) return;
+  if (!storageReport) {
+    els.storageSummaryCards.innerHTML = '<p class="empty compact">正在读取磁盘占用…</p>';
+    return;
+  }
+  const cats = storageReport.categories || {};
+  const ordered = [cats.media, cats.logs, cats.tempJobs, cats.data, cats.stickers, cats.venv].filter(Boolean);
+  els.storageSummaryCards.innerHTML = ordered.map((item) => `
+    <article class="storage-stat-card">
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(formatBytes(item.bytes))}</strong>
+    </article>
+  `).join("") + `
+    <article class="storage-stat-card total">
+      <span>本地临时缓存合计</span>
+      <strong>${escapeHtml(formatBytes(storageReport.ephemeralBytes || 0))}</strong>
+    </article>
+  `;
+  const policy = storageReport.policy || {};
+  if (els.storagePolicyNote) {
+    const lastCleanup = storageReport.lastCleanupAt ? `上次清理：${formatTime(storageReport.lastCleanupAt)}。` : "";
+    els.storagePolicyNote.textContent = `${lastCleanup}QQ 临时图片与文件保留 ${policy.mediaTtlHours || 24} 小时且封顶 ${policy.mediaMaxMb || 200} MB；空闲队列保留 ${policy.chatQueueTtlHours || 72} 小时 / ${policy.chatQueueMaxPerTarget || 120} 条；QQ 空间今日动态跨日自动清理；日志封顶 ${policy.logMaxMb || 5} MB。`;
+  }
+}
+
+async function loadStorageUsage() {
+  if (storageBusy) return;
+  storageBusy = true;
+  try {
+    storageReport = await api("/api/maintenance/storage");
+    renderStorageUsage();
+  } catch (error) {
+    if (els.storageActionStatus) {
+      els.storageActionStatus.textContent = `读取占用失败：${error.message}`;
+      els.storageActionStatus.className = "form-status error";
+    }
+  } finally {
+    storageBusy = false;
+  }
+}
+
+for (const btn of [els.inspectorTabBtnConfig, els.inspectorTabBtnSubscriptions, els.inspectorTabBtnSession, els.inspectorTabBtnDiagnostics]) {
+  btn?.addEventListener("click", () => setInspectorTab(btn.dataset.inspectorTab));
+}
+els.settingsTabBtnGlobal?.addEventListener("click", () => setSettingsTab("global"));
+els.settingsTabBtnStorage?.addEventListener("click", () => setSettingsTab("storage"));
+els.refreshStorageButton?.addEventListener("click", () => loadStorageUsage());
+els.cleanupStorageButton?.addEventListener("click", async () => {
+  if (storageBusy) return;
+  storageBusy = true;
+  els.cleanupStorageButton.disabled = true;
+  if (els.storageActionStatus) {
+    els.storageActionStatus.textContent = "正在清理过期媒体、冗余队列、日志与容器核心转储…";
+    els.storageActionStatus.className = "form-status";
+  }
+  try {
+    const res = await api("/api/maintenance/storage/cleanup", { method: "POST", body: "{}" });
+    if (res.storage) storageReport = res.storage;
+    renderStorageUsage();
+    if (els.storageActionStatus) {
+      els.storageActionStatus.textContent = `清理完成：处理 ${Number(res.removedItems || 0)} 项，释放 ${formatBytes(res.freedBytes || 0)}${res.containerCleaned ? "（已清理容器残留）" : ""}。`;
+      els.storageActionStatus.className = "form-status";
+    }
+  } catch (error) {
+    if (els.storageActionStatus) {
+      els.storageActionStatus.textContent = `清理失败：${error.message}`;
+      els.storageActionStatus.className = "form-status error";
+    }
+  } finally {
+    storageBusy = false;
+    els.cleanupStorageButton.disabled = false;
+  }
 });
+
+els.settingsButton.addEventListener("click", () => {
+  if (phoneLayout.matches) {
+    setMobilePane("details");
+    return;
+  }
+  if (narrowLayout.matches) {
+    els.workspace.classList.toggle("inspector-open");
+  } else {
+    inspectorCollapsed = !inspectorCollapsed;
+    localStorage.setItem("wbqq-inspector-collapsed", inspectorCollapsed ? "1" : "0");
+  }
+  applyInspectorState();
+  if (isInspectorVisible() && inspectorActiveTab === "diagnostics") loadInputPreview();
+});
+phoneLayout.addEventListener("change", applyResponsiveLayout);
+narrowLayout.addEventListener("change", applyInspectorState);
+window.visualViewport?.addEventListener("resize", fitMobileViewport);
+document.addEventListener("focusout", () => requestAnimationFrame(fitMobileViewport));
+els.globalSettingsButton.addEventListener("click", () => {
+  setSettingsTab("global");
+  els.settingsDrawer.showModal();
+});
+els.closeSettingsButton.addEventListener("click", () => els.settingsDrawer.close());
+els.headerResetButton?.addEventListener("click", () => triggerResetConversation());
+els.headerDeleteButton?.addEventListener("click", () => openDeleteTargetDialog());
+els.deleteTargetButton.addEventListener("click", () => openDeleteTargetDialog());
 els.cancelDeleteTargetButton.addEventListener("click", () => els.deleteTargetDialog.close());
 els.deleteTargetDialog.addEventListener("cancel", (event) => { if (deleteTargetSaving) event.preventDefault(); });
 els.deleteTargetForm.addEventListener("submit", async (event) => {
@@ -1036,7 +1461,7 @@ els.deleteTargetForm.addEventListener("submit", async (event) => {
   const target = {...deletingTarget};
   deleteTargetSaving = true;
   els.confirmDeleteTargetButton.disabled = els.cancelDeleteTargetButton.disabled = true;
-  els.deleteTargetStatus.textContent = "正在归档并移出白名单……";
+  els.deleteTargetStatus.textContent = "正在删除会话并清理工作目录与记录……";
   try {
     const segment = target.type === "private" ? "private" : "groups";
     await api(`/api/qq/${segment}/${encodeURIComponent(target.id)}/delete`, {
@@ -1052,23 +1477,68 @@ els.deleteTargetForm.addEventListener("submit", async (event) => {
     els.confirmDeleteTargetButton.disabled = els.cancelDeleteTargetButton.disabled = false;
   }
 });
-els.toggleNavigationButton.addEventListener("click", () => {
-  const open = els.workspace.classList.toggle("nav-open");
-  els.toggleNavigationButton.setAttribute("aria-expanded", String(open));
-});
+els.toggleNavigationButton.addEventListener("click", () => setMobilePane("list"));
+els.returnToChatButton.addEventListener("click", () => setMobilePane("chat"));
+els.closeInspectorButton.addEventListener("click", () => setMobilePane("chat"));
 els.conversationSearch.addEventListener("input", () => renderNavigation(allItems()));
 els.refreshInputButton.addEventListener("click", loadInputPreview);
-els.diagnosticsDetails.addEventListener("toggle", () => { if (els.diagnosticsDetails.open) loadInputPreview(); });
 setInterval(() => {
   const item = currentTarget();
   if (item?.data.activeReply?.waiting) els.activityStatus.textContent = conversationStatus(item.data, state).detail;
 }, 1000);
 
-els.refreshButton.addEventListener("click", refresh);
-els.qzoneButton.addEventListener("click", () => { location.hash = "qzone"; });
-els.closeQzoneButton.addEventListener("click", () => {
+els.refreshButton.addEventListener("click", () => refresh({ forceMetadata: true }));
+els.conversationsTabButton?.addEventListener("click", () => {
+  if (phoneLayout.matches && !els.workspace.hidden) setMobilePane("list");
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   renderView();
+  restoreCurrentScroll();
+});
+els.qzoneButton.addEventListener("click", () => { location.hash = "qzone"; });
+const qzonePaneButtons = [...document.querySelectorAll("button[data-mobile-qzone-pane]")];
+for (const button of qzonePaneButtons) {
+  button.addEventListener("click", () => {
+    const pane = button.dataset.mobileQzonePane;
+    els.qzonePanel.dataset.mobileQzonePane = pane;
+    for (const entry of qzonePaneButtons) entry.setAttribute("aria-pressed", String(entry === button));
+    els.qzonePanel.querySelector(".qzone-scroll").scrollTop = 0;
+  });
+}
+for (const [btn, key] of [
+  [els.qzoneFilterAll, "all"],
+  [els.qzoneFilterBot, "engaged"],
+  [els.qzoneFilterBotPosts, "posts"]
+]) {
+  btn?.addEventListener("click", () => {
+    qzoneTodayFilter = key;
+    renderQzone();
+  });
+}
+els.refreshQzoneTodayButton?.addEventListener("click", async () => {
+  if (qzoneRefreshing) return;
+  qzoneRefreshing = true;
+  els.refreshQzoneTodayButton.disabled = true;
+  if (els.qzoneTodayStatus) {
+    els.qzoneTodayStatus.textContent = "正在从 QQ 空间拉取今日动态与评论…";
+    els.qzoneTodayStatus.className = "form-status";
+  }
+  try {
+    const updated = await api("/api/qq/qzone/refresh-today", { method: "POST", body: "{}" });
+    if (state?.qq) state.qq.qzone = updated;
+    renderQzone();
+    if (els.qzoneTodayStatus) {
+      els.qzoneTodayStatus.textContent = `已刷新今日动态（共 ${(updated.todayFeeds || []).length} 条）。`;
+      els.qzoneTodayStatus.className = "form-status";
+    }
+  } catch (error) {
+    if (els.qzoneTodayStatus) {
+      els.qzoneTodayStatus.textContent = `刷新失败：${error.message}`;
+      els.qzoneTodayStatus.className = "form-status error";
+    }
+  } finally {
+    qzoneRefreshing = false;
+    els.refreshQzoneTodayButton.disabled = false;
+  }
 });
 els.qzoneForm.addEventListener("change", () => { qzoneDirty = true; });
 els.qzoneForm.addEventListener("submit", async (event) => {
@@ -1094,10 +1564,6 @@ els.qzoneForm.addEventListener("submit", async (event) => {
 });
 els.stickerGalleryButton.addEventListener("click", () => {
   location.hash = "stickers";
-});
-els.closeStickerGalleryButton.addEventListener("click", () => {
-  history.replaceState(null, "", `${location.pathname}${location.search}`);
-  renderView();
 });
 for (const [button, view] of [[els.stickerLibraryButton, "library"], [els.stickerBlacklistButton, "blacklist"]]) {
   button.addEventListener("click", () => {
@@ -1214,7 +1680,10 @@ els.stickerGalleryGrid.addEventListener("submit", async (event) => {
     renderStickerGallery();
   }
 });
-window.addEventListener("hashchange", renderView);
+window.addEventListener("hashchange", () => {
+  renderView();
+  restoreCurrentScroll();
+});
 els.replyEnabledToggle.addEventListener("change", async () => {
   const item = currentTarget();
   if (!item || replySwitchSaving) return;
@@ -1251,12 +1720,19 @@ els.agentDispatchToggle.addEventListener("change", async () => {
 });
 for (const list of [els.groupList, els.privateList, els.sourceList]) {
   list.addEventListener("click", (event) => {
+    const deleteButton = event.target.closest("[data-delete-target-key]");
+    if (deleteButton) {
+      event.stopPropagation();
+      const target = allItems().find((candidate) => candidate.key === deleteButton.dataset.deleteTargetKey);
+      if (target) openDeleteTargetDialog(target);
+      return;
+    }
     const button = event.target.closest("[data-target-key]");
     if (button) selectTarget(button.dataset.targetKey);
   });
 }
 els.conversation.addEventListener("scroll", () => {
-  if (!renderedKey) return;
+  if (!renderedKey || !els.conversation.clientHeight) return;
   const tracker = scrollTracker(renderedKey);
   tracker.top = els.conversation.scrollTop;
   tracker.followLatest = isNearBottom();
@@ -1266,14 +1742,7 @@ els.conversation.addEventListener("scroll", () => {
 els.jumpToLatest.addEventListener("click", () => scrollToLatest(true));
 els.sessionButton.addEventListener("click", () => postTargetAction("session").catch(showError));
 els.retryButton.addEventListener("click", () => postTargetAction("retry").catch(showError));
-els.resetButton.addEventListener("click", () => {
-  const item = currentTarget();
-  const warning = item?.kind === "group"
-    ? "为当前群创建新的 WorkBuddy 会话？新会话初始化成功后，旧会话和本地历史将永久删除。"
-    : "为当前私聊创建新的 WorkBuddy 会话？旧会话不会再自动使用。";
-  if (!confirm(warning)) return;
-  postTargetAction("reset").catch(showError);
-});
+els.resetButton.addEventListener("click", () => triggerResetConversation());
 els.cancelButton.addEventListener("click", async () => {
   const item = currentTarget();
   if (!item) return;
@@ -1305,13 +1774,22 @@ els.speakerGreetingRows.addEventListener("click", (event) => {
 els.addSpeakerGreetingButton.addEventListener("click", () => {
   const row = appendSpeakerGreetingRow({
     id: crypto.randomUUID(), time: "", days: [0, 1, 2, 3, 4, 5, 6],
-    enabled: state?.ai?.speakerGreetingsAvailable === true && els.agentHomeAssistantPermission.value !== "disabled",
+    enabled: (maintenance?.homeAssistant?.speakerReady ?? (state?.ai?.speakerGreetingsAvailable === true))
+      && els.agentHomeAssistantPermission.value !== "disabled",
     weather: false
   });
   markSettingsDirty();
   row.querySelector(".greeting-time").focus();
 });
 els.agentCalendarRemindersEnabled.addEventListener("change", () => {
+  updateParameterExplanation(currentTarget());
+  markSettingsDirty();
+});
+els.agentGroupEssenceEnabled.addEventListener("change", () => {
+  updateParameterExplanation(currentTarget());
+  markSettingsDirty();
+});
+els.agentGroupMuteEnabled.addEventListener("change", () => {
   updateParameterExplanation(currentTarget());
   markSettingsDirty();
 });
@@ -1377,11 +1855,11 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
   }
   const enablingGroupFullAccess = item.kind === "group"
     && els.agentPermissionMode.value === "dangerFullAccess"
-    && item.data.codexConfig?.permissionMode !== "dangerFullAccess";
+    && item.data.agentConfig?.permissionMode !== "dangerFullAccess";
   if (enablingGroupFullAccess && !window.confirm(`开启完全访问后，当前群的所有成员都能通过${agentName()}操作整台 Mac，并发送本机任意位置的文件到本群。只读通知源不会获得该权限。确认开启吗？`)) return;
   const enablingGroupHomeAccess = item.kind === "group"
     && els.agentHomeAssistantPermission.value === "group"
-    && item.data.codexConfig?.homeAssistantPermission !== "group";
+    && item.data.agentConfig?.homeAssistantPermission !== "group";
   if (enablingGroupHomeAccess && !window.confirm("开启全群家居权限后，本群所有成员都能请求控制已开放的设备并让小爱音箱说话。不会开放 HA 账号或系统设置，其他群不受影响。确认开启吗？")) return;
   settingsSavingKey = item.key;
   els.saveAgentSettingsButton.disabled = true;
@@ -1401,10 +1879,14 @@ els.agentSettingsForm.addEventListener("submit", async (event) => {
         permissionMode: els.agentPermissionMode.value,
         calendarRemindersEnabled: els.agentCalendarRemindersEnabled.checked,
         homeAssistantPermission: els.agentHomeAssistantPermission.value,
+        ...(item.kind === "group" ? {
+          groupEssenceEnabled: els.agentGroupEssenceEnabled.checked,
+          groupMuteEnabled: els.agentGroupMuteEnabled.checked
+        } : {}),
         speakerGreetings
       })
     });
-    item.data.codexConfig = response.codexConfig;
+    item.data.agentConfig = response.agentConfig;
     if (currentTarget()?.key === item.key) {
       settingsDirty = false;
       settingsSignature = "";
@@ -1501,6 +1983,89 @@ els.personaCatchphraseForm.addEventListener("submit", async (event) => {
     els.personaCatchphraseSaveStatus.textContent = error.message;
     els.personaCatchphraseSaveStatus.className = "form-status error";
     els.savePersonaCatchphraseButton.disabled = false;
+  }
+});
+els.exportPersonaButton?.addEventListener("click", async () => {
+  els.exportPersonaButton.disabled = true;
+  els.personaPortabilityStatus.textContent = "正在导出人格文件…";
+  els.personaPortabilityStatus.className = "form-status";
+  try {
+    const bundle = await api("/api/qq/persona/export");
+    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const safeName = String(bundle?.ownerStyle?.agentName || bundle?.core?.name || "agent").replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_");
+    const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeName}-persona-${stamp}.laodai-persona.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    els.personaPortabilityStatus.textContent = `已导出（${bundle?.examples?.examples?.length || 0} 条情境示例）。`;
+  } catch (error) {
+    els.personaPortabilityStatus.textContent = error.message;
+    els.personaPortabilityStatus.className = "form-status error";
+  } finally {
+    els.exportPersonaButton.disabled = false;
+  }
+});
+els.importPersonaButton?.addEventListener("click", () => {
+  els.importPersonaFileInput.value = "";
+  els.importPersonaFileInput.click();
+});
+els.importPersonaFileInput?.addEventListener("change", async () => {
+  const file = els.importPersonaFileInput.files?.[0];
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const displayName = parsed?.ownerStyle?.agentName || parsed?.core?.name || "未命名";
+    const exampleCount = Array.isArray(parsed?.examples) ? parsed.examples.length : (parsed?.examples?.examples?.length ?? 0);
+    const catchphrases = parsed?.ownerStyle?.activeCatchphrases ?? parsed?.core?.catchphrases ?? [];
+    if (!confirm(`确定导入人格「${displayName}」？\n来源：${parsed?.core?.source || "未知"}\n情境示例：${exampleCount} 条 · 口头禅：${catchphrases.length} 条\n导入后将覆盖当前人格，下一轮回复生效。`)) {
+      return;
+    }
+    els.importPersonaButton.disabled = true;
+    els.personaPortabilityStatus.textContent = "正在导入人格…";
+    els.personaPortabilityStatus.className = "form-status";
+    const result = await api("/api/qq/persona/import", {
+      method: "POST",
+      body: JSON.stringify(parsed)
+    });
+    state.persona = result.persona;
+    personaNameDirty = false;
+    personaCatchphraseDirty = false;
+    personaCatchphraseSignature = "";
+    els.personaPortabilityStatus.textContent = `已导入「${result.name}」（${result.exampleCount} 条示例，${result.catchphraseCount} 条口头禅）。`;
+    renderPersona(currentTarget());
+    scheduleRefresh();
+  } catch (error) {
+    els.personaPortabilityStatus.textContent = error.message;
+    els.personaPortabilityStatus.className = "form-status error";
+  } finally {
+    els.importPersonaButton.disabled = false;
+    els.importPersonaFileInput.value = "";
+  }
+});
+els.resetPersonaButton?.addEventListener("click", async () => {
+  if (!confirm("确定移除已导入人格并恢复为默认基础人格？")) return;
+  els.resetPersonaButton.disabled = true;
+  els.personaPortabilityStatus.textContent = "正在恢复默认人格…";
+  els.personaPortabilityStatus.className = "form-status";
+  try {
+    const result = await api("/api/qq/persona/reset-imported", { method: "POST", body: "{}" });
+    state.persona = result.persona;
+    personaNameDirty = false;
+    personaCatchphraseDirty = false;
+    personaCatchphraseSignature = "";
+    els.personaPortabilityStatus.textContent = "已恢复默认基础人格。";
+    renderPersona(currentTarget());
+    scheduleRefresh();
+  } catch (error) {
+    els.personaPortabilityStatus.textContent = error.message;
+    els.personaPortabilityStatus.className = "form-status error";
+  } finally {
+    els.resetPersonaButton.disabled = false;
   }
 });
 els.stickerLabelModel.addEventListener("change", () => {
@@ -1617,12 +2182,60 @@ els.groupForm.addEventListener("submit", async (event) => {
   }
 });
 
+let friendCandidatesLoading = false;
+let availableFriendsCache = [];
+
+async function loadFriendCandidates() {
+  if (friendCandidatesLoading) return;
+  friendCandidatesLoading = true;
+  els.reloadFriendCandidatesButton.disabled = true;
+  els.privateFriendCandidate.innerHTML = '<option value="">正在读取好友列表…</option>';
+  els.privateFriendCandidate.disabled = true;
+  els.privateFormStatus.textContent = "正在读取机器人好友列表…";
+  els.privateFormStatus.className = "form-status";
+  try {
+    const result = await api("/api/qq/friends/available");
+    const friends = result.friends || [];
+    availableFriendsCache = friends;
+    els.privateFriendCandidate.innerHTML = friends.length
+      ? '<option value="">从好友列表选择（或下方手动输入）</option>' + friends.map((f) => {
+          const label = f.remark && f.nickname && f.remark !== f.nickname
+            ? `${f.remark}（${f.nickname}）`
+            : (f.displayName || f.remark || f.nickname || "未命名好友");
+          return `<option value="${escapeHtml(f.userId)}">${escapeHtml(label)} · ${escapeHtml(f.userId)}</option>`;
+        }).join("")
+      : '<option value="">暂无可选择的好友（可下方手动输入）</option>';
+    els.privateFriendCandidate.disabled = !friends.length;
+    els.privateFormStatus.textContent = friends.length ? `已加载 ${friends.length} 位好友，可选择或手动填写 QQ 号。` : "暂无可添加的 QQ 好友，请在下方手动填写 QQ 号。";
+    els.privateFormStatus.className = "form-status";
+  } catch (error) {
+    availableFriendsCache = [];
+    els.privateFriendCandidate.innerHTML = '<option value="">读取好友失败，请手动输入</option>';
+    els.privateFormStatus.textContent = `${error.message}；仍可在下方手动输入 QQ 号。`;
+    els.privateFormStatus.className = "form-status error";
+  } finally {
+    friendCandidatesLoading = false;
+    els.reloadFriendCandidatesButton.disabled = false;
+  }
+}
+
 els.addPrivateButton.addEventListener("click", () => {
   els.privateForm.hidden = false;
   els.addPrivateButton.hidden = true;
   els.privateFormStatus.textContent = "";
   els.privateFormStatus.className = "form-status";
+  loadFriendCandidates().catch(showError);
   els.privateUserId.focus();
+});
+els.reloadFriendCandidatesButton.addEventListener("click", () => loadFriendCandidates().catch(showError));
+els.privateFriendCandidate.addEventListener("change", () => {
+  const userId = els.privateFriendCandidate.value;
+  if (!userId) return;
+  const friend = availableFriendsCache.find((item) => item.userId === userId);
+  els.privateUserId.value = userId;
+  if (friend && !els.privateDisplayName.value.trim()) {
+    els.privateDisplayName.value = friend.displayName || friend.remark || friend.nickname || "";
+  }
 });
 els.cancelPrivateButton.addEventListener("click", () => {
   els.privateForm.hidden = true;
@@ -1730,7 +2343,8 @@ function formatBytes(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function effortLabel(value) {
@@ -1749,5 +2363,17 @@ function permissionModeLabel(value) {
   return ({ readOnly: "只读", workspaceWrite: "工作区", dangerFullAccess: "完全访问" })[value] || "工作区";
 }
 
-await refresh();
-connectStream();
+els.lanLogoutButton?.addEventListener("click", async () => {
+  try {
+    await fetch(`${HUB}/api/lan-auth/logout`, { method: "POST" });
+  } finally {
+    location.replace("/login.html");
+  }
+});
+
+applyResponsiveLayout();
+if (await checkLanSession()) {
+  void pollQQLoginStatus();
+  await refresh();
+  connectStream();
+}

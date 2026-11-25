@@ -74,7 +74,7 @@ function listPage(raw, { offset = 0, limit = 30 } = {}) {
   return { total: values.length, offset: start, limit: size, items: values.slice(start, start + size) };
 }
 
-export async function readGroupManagement({ oneBot, groupId, botId, args = {} }) {
+export async function readGroupManagement({ oneBot, groupId, botId, args = {}, permissions = null }) {
   const section = String(args.section || "status");
   const role = await currentRole(oneBot, groupId, botId);
   if (section === "status") {
@@ -82,11 +82,17 @@ export async function readGroupManagement({ oneBot, groupId, botId, args = {} })
       oneBot.getGroupInfo(groupId),
       checkedRequest(oneBot, "/get_group_admin_settings", { group_id: Number(groupId) }).catch(() => null)
     ]);
+    const isAdmin = role === "admin" || role === "owner";
+    const groupEssenceEnabled = permissions ? permissions.groupEssenceEnabled === true : false;
+    const groupMuteEnabled = permissions ? permissions.groupMuteEnabled === true : false;
     return {
       groupId: String(groupId), groupName: info?.group_name || null, botRole: role,
-      canManage: role === "admin" || role === "owner",
-      automaticLimitedMute: role === "admin" || role === "owner",
-      ownerAuthorizedActions: role === "admin" || role === "owner" ? [...OWNER_APPROVAL_ACTIONS].filter((action) => role === "owner" || !OWNER_ROLE_ONLY.has(action)) : [],
+      canManage: isAdmin,
+      groupEssenceEnabled,
+      groupMuteEnabled,
+      automaticEssence: isAdmin && groupEssenceEnabled,
+      automaticLimitedMute: isAdmin && (!permissions || groupMuteEnabled),
+      ownerAuthorizedActions: isAdmin ? [...OWNER_APPROVAL_ACTIONS].filter((action) => role === "owner" || !OWNER_ROLE_ONLY.has(action)) : [],
       settings: settings ? {
         add_type: settings.add_type, member_invite_policy: settings.member_invite_policy,
         new_member_history_visible: settings.new_member_history_visible,
@@ -129,13 +135,24 @@ async function checkedGroupMessage(oneBot, groupId, value, messageReader) {
   return messageId;
 }
 
-export async function manageGroup({ oneBot, groupId, botId, ownerId, ownerMessage = null, messageReader, args = {} }) {
+export async function manageGroup({ oneBot, groupId, botId, ownerId, ownerMessage = null, messageReader, args = {}, permissions = null }) {
   const action = String(args.action || "");
   if (!GROUP_MANAGEMENT_ACTIONS.includes(action)) deny("未知或未实现的群管理操作。");
   const role = await currentRole(oneBot, groupId, botId);
   if (!["admin", "owner"].includes(role)) deny(`${getAgentName()}目前不是这个群的管理员，管理操作已自动关闭。`);
+  if (permissions) {
+    if (["pin_message", "unpin_message"].includes(action) && permissions.groupEssenceEnabled !== true) {
+      deny("当前群未开启「允许设置精华消息」开关，请先在群会话参数中开启。");
+    }
+    if (["mute_member", "unmute_member", "mute_all"].includes(action) && permissions.groupMuteEnabled !== true) {
+      deny("当前群未开启「允许管理群禁言」开关，请先在群会话参数中开启。");
+    }
+  }
   const ownerAuthorized = hasCurrentOwnerContext(ownerMessage, groupId, ownerId);
-  if (OWNER_APPROVAL_ACTIONS.has(action) && !ownerAuthorized) deny("此操作需要 OWNER 认可；请先读取本轮当前群的 OWNER 直接消息，并结合上下文确认认可范围。无需 OWNER 重复操作关键词、QQ 号或消息编号；其他成员、旧上下文和引用不能代替认可。");
+  const autonomousByGroupSwitch =
+    (permissions?.groupEssenceEnabled === true && ["pin_message", "unpin_message"].includes(action))
+    || (permissions?.groupMuteEnabled === true && action === "unmute_member");
+  if (OWNER_APPROVAL_ACTIONS.has(action) && !autonomousByGroupSwitch && !ownerAuthorized) deny("此操作需要 OWNER 认可；请先读取本轮当前群的 OWNER 直接消息，并结合上下文确认认可范围。无需 OWNER 重复操作关键词、QQ 号或消息编号；其他成员、旧上下文和引用不能代替认可。");
   if (OWNER_ROLE_ONLY.has(action) && role !== "owner") deny(`QQ 只允许群主执行此操作；${getAgentName()}当前只是管理员。`);
   const body = { group_id: Number(groupId) };
   let path;

@@ -2,9 +2,7 @@
 
 # WorkBuddy QQ Agent 网关
 
-这是为 WorkBuddy 定制的 QQ Agent 网关，不是通用聊天机器人，也不是以 Codex 为主的接入器。把本机 WorkBuddy Agent 接入 QQ，群聊、私聊默认拥有独立持久会话，也可明确选择让私聊共享某个群的模型上下文；在网页里查看实时输出、调整模型与权限、管理通知订阅和表情包。
-
-本仓库独立发布，不是 GitHub fork。代码基于 [Epic0522/Codex-Remote-Contact](https://github.com/Epic0522/Codex-Remote-Contact) 扩展，默认引擎、MCP 工具、持久会话、权限与部署流程均围绕 WorkBuddy 设计；Codex 适配仅作为兼容路径保留，不代表两者功能完全一致。上游尚未声明许可证：公开源码不等同于已取得完整开源许可。见 [来源清单](../docs/PROVENANCE.md) 和 [许可证说明](../LICENSE-NOTICE.md)。
+这是为 WorkBuddy 定制的独立 QQ Agent 网关，默认引擎、MCP 工具、持久会话、权限与桌面端/部署流程均围绕 WorkBuddy 设计。把本机 WorkBuddy Agent 接入 QQ，群聊、私聊默认拥有独立持久会话，也可明确选择让私聊共享某个群的模型上下文；在 macOS 桌面应用或网页控制台里查看实时输出、调整模型与权限、管理通知订阅、群管自主权限和表情包。
 
 ## 页面展示
 
@@ -107,7 +105,7 @@ Node 服务没有生产 npm 依赖；SDK 固定版本见 [requirements.txt](../m
 
 安装脚本会选择 PATH 中的 Python 3.10+，不会使用版本过旧的 Mac 系统 Python。可用 `WB_PYTHON=/你的/python3路径 bash modules/workbuddy-agent/setup.sh` 指定解释器；已有旧版虚拟环境时先移到备份目录再安装。
 
-编辑不入库的 config/qq-only.env，填写 CODEX_REMOTE_CONTACT_OWNER_QQ_ID（管理员）和 CODEX_REMOTE_CONTACT_BOT_QQ_ID（独立小号）。必须是不同的实际数字 QQ 号，没有默认值。必要时配置 WB_AGENT_CLI 和 CODEX_REMOTE_CONTACT_WB_PYTHON。
+编辑不入库的 config/qq-only.env，填写 WORKBUDDY_QQ_OWNER_QQ_ID（管理员）和 WORKBUDDY_QQ_BOT_QQ_ID（独立小号）。必须是不同的实际数字 QQ 号，没有默认值。必要时配置 WB_AGENT_CLI 和 WORKBUDDY_QQ_WB_PYTHON。
 
 启动后在网关左侧的“Agent 群聊 / Agent 私聊”点击“添加”，可从机器人已加入的 QQ 群中选择，或输入允许私聊的 QQ 号。白名单立即生效并写回不入库的 runtime/qq-only-data/settings.json；OWNER 私聊始终可用。也可预先编辑 qq.allowedGroups 和 qq.privateAgentUsers。先加入 Agent 群，再在面板订阅只读来源；一个群不能同时承担两个角色。新群沿用默认的工作区权限，不会自动获得完全访问权限。
 
@@ -123,14 +121,14 @@ Node 服务没有生产 npm 依赖；SDK 固定版本见 [requirements.txt](../m
 
 关联保存在私有数据目录的 `context-links.json`，重启自动恢复，不随源码上传。切换上下文只重置该私聊的读取位置，保留待处理消息，不导入原 thread 的历史。
 
-启动脚本从 macOS 钥匙串读取通用密码，服务名默认 Codex Remote Contact QQ：
+启动脚本从 macOS 钥匙串读取通用密码，服务名默认 WorkBuddy QQ Gateway：
 
 | 账户名 | 用途 |
 | --- | --- |
 | hub-api-token | 面板/API 鉴权及可选回调凭证 |
 | onebot-api-token | 调用 OneBot 的访问令牌 |
 
-通过“钥匙串访问”创建上述项目，使用独立随机令牌，不复用 QQ 密码。也可从外部环境注入 CODEX_REMOTE_CONTACT_API_TOKEN / ONEBOT_ACCESS_TOKEN，但不能提交实际值。
+通过“钥匙串访问”创建上述项目，使用独立随机令牌，不复用 QQ 密码。也可从外部环境注入 WORKBUDDY_QQ_API_TOKEN / ONEBOT_ACCESS_TOKEN，但不能提交实际值。
 
 OneBot HTTP 事件上报地址为 http://127.0.0.1:3789/api/onebot/event，需配置一致的回调令牌或签名。容器的 localhost 不是 Mac，必须使用容器可达的宿主机地址和端口转发。不要为了连通将面板裸露到公网。
 
@@ -194,8 +192,8 @@ npm run audit:public
 | src/storage、src/security | 持久状态、订阅引用和权限 |
 | src/workbuddy、modules/workbuddy-agent | 客户端、Python 桥、stdio MCP |
 | src/persona、persona | 固定系统人格、手工偏好与通用正反示例 |
-| modules/web-console、modules/mac-client | 网页与 macOS 客户端 |
-| scripts、test、test-support | 自动化、恢复、演示、审计和离线测试 |
+| modules/web-console、modules/macos-app | 网页与原生 macOS 桌面应用（含 PKG 安装器） |
+| scripts、test | 自动化、恢复、演示、审计和离线测试 |
 
 ## 已知限制
 
@@ -208,6 +206,6 @@ npm run audit:public
 - 图片/文件上传受 QQ 和网络影响；已提交的发送不能撤回。动态结果不确定时不自动重试。
 - Apple 自动化需系统授权及预先存在的目标列表。路径权限、上传能力、macOS 隐私权限是三件不同的事。
 
-## 来源与许可
+## 说明
 
-感谢原作者 [Epic0522](https://github.com/Epic0522)。这是独立仓库，使用脱敏快照与全新提交历史，不上传本机旧历史、私人数据或登录凭证。上游无许可证，不擅自给整仓标注 MIT / Apache；“GitHub 可查看和派生”不等同于任意商用或再分发许可。
+本仓库围绕 WorkBuddy 独立设计与维护，不包含任何私有数据、本地运行历史或登录凭证；内置通用人格模板与第三方依赖另有各自适用条款（见 [persona/QQ-BRIDGE-NOTICE.txt](../persona/QQ-BRIDGE-NOTICE.txt)）。

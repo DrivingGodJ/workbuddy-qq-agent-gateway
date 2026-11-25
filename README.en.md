@@ -30,9 +30,19 @@ Search stickers, edit their usage labels and manage a blacklist. Optional integr
 
 *All images show the real frontend with synthetic demo data, not real QQ conversations.*
 
-## Try the demo before connecting your environment
+## Install or try the local demo
 
-A local demo requires neither QQ login nor model calls, so you can explore the console first. Live deployment targets macOS and uses your own WorkBuddy account and QQ bridge.
+### Option A: Apple Silicon macOS Desktop App (Recommended)
+
+Download **`WorkBuddyQQGateway-0.3.0-arm64.pkg`** from [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases), install it into `/Applications`, and follow the 6-step onboarding wizard:
+
+- **Guided setup & non-destructive takeover**: automatically detects existing deployments or sets up Colima + SnowLuma, macOS Keychain credentials, and login startup;
+- **Full native desktop & web console**: manage group/private sessions, add private chats from your QQ friend list, toggle autonomous group admin permissions (essence messages / moderation mutes), configure Home Assistant & XiaoAI scheduled greetings, curate stickers, and enable the LAN control panel;
+- **Persona backup & selective uninstall**: import/export `.laodai-persona.json` personas, with options to remove only the SnowLuma container/image or the full VM.
+
+### Option B: Local demo from source (no QQ or model usage)
+
+A local demo requires neither QQ login nor model calls, so you can explore the console first.
 
 [Demo and deployment guide](docs/GUIDE.en.md)
 
@@ -44,6 +54,6 @@ A local demo requires neither QQ login nor model calls, so you can explore the c
 | Sessions, subscriptions, shared context and automation | [Full reference (Chinese)](docs/readme-reference.zh-CN.md) |
 | Permissions, data and security | [Security](SECURITY.md) |
 | Local customization and home integration | [Customization](docs/LOCAL_CUSTOMIZATION.md) · [Home Assistant](docs/HOME_ASSISTANT.md) |
-| Origins, licensing and feedback | [Provenance](docs/PROVENANCE.md) · [License notice](LICENSE-NOTICE.md) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
+| Downloads and feedback | [Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
 
-Extends [Epic0522/Codex-Remote-Contact](https://github.com/Epic0522/Codex-Remote-Contact), independently maintained around WorkBuddy. Upstream has no declared license; read the license notice before use or distribution.
+Independently built and maintained around WorkBuddy. Follow [Security](SECURITY.md) and the terms of the third-party tools and services you connect (QQ, WorkBuddy, Home Assistant, etc.).

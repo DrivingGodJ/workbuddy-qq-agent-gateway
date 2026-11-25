@@ -22,4 +22,4 @@ Choose the command for the intended action; do not run all commands sequentially
 
 Xcode Command Line Tools are required to compile the helper. `brightness` is an optional debugging/fallback tool.
 
-`backlight-off-keep-awake.command` uses a C helper built from this module's `src/codexremotecontact-backlight.c`. It targets online built-in displays and skips external monitors.
+`backlight-off-keep-awake.command` uses a C helper built from this module's `src/workbuddy-qq-backlight.c`. It targets online built-in displays and skips external monitors.

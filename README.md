@@ -30,20 +30,30 @@
 
 *以上均为真实前端配合合成演示数据，不包含实际 QQ 聊天记录。*
 
-## 先看演示，再接入自己的环境
+## 下载安装或本地预览
 
-项目提供不登录 QQ、不调用模型的本地演示，适合先看看面板与交互。真实部署面向 macOS，使用自己的 WorkBuddy 与 QQ 桥。
+### 方式 A：Apple Silicon Mac 原生桌面端（推荐）
 
-[打开演示与部署指南](docs/GUIDE.zh-CN.md)
+前往 [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) 下载最新安装包 **`WorkBuddyQQGateway-0.3.0-arm64.pkg`**，双击安装到「应用程序」目录后打开即可按 6 步图形化引导完成配置：
+
+- **自动部署与接管**：检测并复用已有部署，或从零配置 Colima + SnowLuma 容器、macOS 钥匙串凭据与登录后自启；
+- **完整图形控制台**：内置群聊/私聊管理、好友列表快速添加私聊、群管自主权限开关（精华消息 / 违规禁言）、智能家居与小爱定时播报、表情库管理及局域网广播面板；
+- **人格导入导出与独立卸载器**：支持 `.laodai-persona.json` 人格备份导入导出，卸载时可选择仅移除 SnowLuma 容器/镜像或完整清理虚拟机。
+
+### 方式 B：源码本地演示（无需 QQ 与模型额度）
+
+项目提供不登录 QQ、不调用模型的本地演示，适合先看看网页控制台与交互：
+
+[打开演示与源码部署指南](docs/GUIDE.zh-CN.md)
 
 ## 进一步了解
 
 | 想了解什么 | 去哪里看 |
 | --- | --- |
-| 本地演示、环境要求与部署 | [使用指南](docs/GUIDE.zh-CN.md) |
+| 下载与使用、环境要求、源码部署 | [使用指南](docs/GUIDE.zh-CN.md) |
 | 会话、订阅、共享上下文和自动化 | [完整功能参考](docs/readme-reference.zh-CN.md) |
 | 权限、数据与安全 | [安全说明](SECURITY.md) |
 | 本地修改与家居集成 | [定制结构](docs/LOCAL_CUSTOMIZATION.md) · [Home Assistant](docs/HOME_ASSISTANT.md) |
-| 来源、许可与反馈 | [来源清单](docs/PROVENANCE.md) · [许可说明](LICENSE-NOTICE.md) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
+| 问题反馈与下载安装包 | [Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [Issues](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues) |
 
-基于 [Epic0522/Codex-Remote-Contact](https://github.com/Epic0522/Codex-Remote-Contact) 扩展，围绕 WorkBuddy 独立维护；上游许可未声明，使用与分发条件请先阅读许可说明。
+围绕 WorkBuddy 独立设计与维护。使用与扩展请遵守 [安全说明](SECURITY.md) 及所接入第三方服务（QQ、WorkBuddy、Home Assistant 等）的各自条款。

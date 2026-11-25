@@ -33,7 +33,7 @@ cp persona/examples.json config/private/persona/examples.json
 再在 `config/qq-only.env` 加入：
 
 ~~~bash
-CODEX_REMOTE_CONTACT_PERSONA_DIR=config/private/persona
+WORKBUDDY_QQ_PERSONA_DIR=config/private/persona
 ~~~
 
 路径相对于项目根目录，也可用绝对路径。`core.json` 必须是包含非空 `name` 的 JSON 对象，`examples.json` 必须包含 `examples` 数组。配置缺失或损坏时拒绝启动，不悄悄回退至通用人格。
@@ -74,7 +74,7 @@ WorkBuddy 切换模型、推理强度或上下文阈值时，会重连并续接�
 
 在已有部署升级时，不重新复制 `settings.example.json` 覆盖真实 settings，不删除运行目录、SDK 环境、会话映射或 QQ 容器。`vendor`、`build` 和旧项目 Git 历史不是公开发布内容，但不代表可随意删除正在使用的文件。
 
-清理旧会话必须先以群与私聊原始存储中的真实 `threadId` 为保护名单，再核对 SDK 映射。共享上下文私聊的原 thread 虽不再运行，仍是需保留的搁置会话；不要只根据面板当前显示的共享 thread 清理。不能按日期或“看起来像测试”删除其他 WorkBuddy / Codex 会话。发现未引用的网关会话时，停止对应写入进程后，将明确的文件移到项目外的私人备份目录；验证当前 thread 仍能续接后再恢复调度。
+清理旧会话必须先以群与私聊原始存储中的真实 `threadId` 为保护名单，再核对 SDK 映射。共享上下文私聊的原 thread 虽不再运行，仍是需保留的搁置会话；不要只根据面板当前显示的共享 thread 清理。不能按日期或“看起来像测试”删除其他 WorkBuddy 会话。发现未引用的网关会话时，停止对应写入进程后，将明确的文件移到项目外的私人备份目录；验证当前 thread 仍能续接后再恢复调度。
 
 ## 更新与验收
 

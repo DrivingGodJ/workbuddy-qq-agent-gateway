@@ -11,16 +11,15 @@ import { TurnDiagnostics } from "./turn-diagnostics.js";
 /**
  * WorkBuddy 引擎客户端
  *
- * 与 src/codex/client.js 同构：同样的 JSON-RPC over stdio、
- * 同样的公开方法（startThread / resumeThread / runTurn / interruptGroup /
- * deleteThread / activeGroups / listModels / listLoadedThreads / close），
- * 只是把对端从 `codex app-server` 换成 Python 桥 `modules/workbuddy-agent/bridge.py`。
+ * 通过 JSON-RPC over stdio 对接 Python 桥 `modules/workbuddy-agent/bridge.py`
+ * （startThread / resumeThread / runTurn / interruptGroup /
+ * deleteThread / activeGroups / listModels / listLoadedThreads / close）。
  *
  * 之所以走「Node -> Python 桥 -> CodeBuddy Agent SDK」：
  *   1. 网关保持零依赖（SDK 只需要装在桥自己的 venv 里）
- *   2. 复用网关已有的 app-server 协议抽象，改动面最小
+ *   2. 复用网关已有的会话协议抽象，改动面最小
  *   3. Node 版 SDK 在本机 initialize 会超时（实测两版 CLI 都卡住），
- *      Python SDK 0.3.261 实测四项全通（往返 / 会话隔离 / 续接 / 中断）
+ *      Python SDK 实测四项全通（往返 / 会话隔离 / 续接 / 中断）
  */
 
 export class WorkBuddyResumeError extends Error {
@@ -54,23 +53,21 @@ const DEFAULT_BRIDGE = path.join(MODULE_ROOT, "bridge.py");
 /**
  * 桥进程必须跑在装了 codebuddy-agent-sdk 的解释器上，系统 python3 没有这个依赖。
  * 这里直接默认指向模块自带的 venv（存在就用），这样 launchd 环境下不必再靠
- * `config/qq-only.env` 注入 CODEX_REMOTE_CONTACT_WB_PYTHON —— 那个文件在宿主侧
+ * `config/qq-only.env` 注入 WORKBUDDY_QQ_WB_PYTHON —— 那个文件在宿主侧
  * 会以 EPERM 读取失败，导致 run-qq-only.command 的 `source` 直接退出。
  */
 const DEFAULT_VENV_PYTHON = path.join(MODULE_ROOT, ".venv", "bin", "python");
 
 /**
- * WorkBuddy 的模型命名空间和 Codex 完全不同。网关持久化的会话里可能还留着
- * gpt-5.x / o3 这类 Codex 名字（settings 层的回退只覆盖全局默认，覆盖不到每个
- * 会话自己的 codexConfig.model），直接透传会让 CLI 报「模型不可用」。
- * 识别到 Codex 名字就丢掉，交给 CLI 用默认模型。
+ * 网关早期持久化的会话里可能还留着旧模型命名（如 gpt-5.x / o3）。
+ * 识别到不兼容旧名称就丢掉，交给 CLI 用默认模型。
  */
-const CODEX_MODEL_PATTERN = /^(gpt-|o[0-9])/i;
+const UNSUPPORTED_LEGACY_MODEL_PATTERN = /^(gpt-|o[0-9])/i;
 
 function normalizeModel(model) {
   const value = typeof model === "string" ? model.trim() : "";
   if (!value || value === "N/A") return null;
-  return CODEX_MODEL_PATTERN.test(value) ? null : value;
+  return UNSUPPORTED_LEGACY_MODEL_PATTERN.test(value) ? null : value;
 }
 
 // Unknown tools are deliberately not replay-safe, including Bash and subagents.
@@ -96,7 +93,7 @@ function replaySafeTurn(active, released, toolAttempts) {
 export class WorkBuddyClient {
   constructor({
     python,
-    bridgePath = process.env.CODEX_REMOTE_CONTACT_WB_BRIDGE || DEFAULT_BRIDGE,
+    bridgePath = process.env.WORKBUDDY_QQ_WB_BRIDGE || DEFAULT_BRIDGE,
     cwd,
     model,
     effort,
@@ -110,7 +107,7 @@ export class WorkBuddyClient {
   } = {}) {
     this.python =
       python ||
-      process.env.CODEX_REMOTE_CONTACT_WB_PYTHON ||
+      process.env.WORKBUDDY_QQ_WB_PYTHON ||
       (existsSync(DEFAULT_VENV_PYTHON) ? DEFAULT_VENV_PYTHON : "python3");
     this.bridgePath = bridgePath;
     this.cwd = cwd;
@@ -165,6 +162,7 @@ export class WorkBuddyClient {
       "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
       "LANG", "LC_ALL", "LC_CTYPE", "__CF_USER_TEXT_ENCODING", "TZ", "PWD",
       "WB_AGENT_CLI", "WB_AGENT_ENV_KEEP", "WB_AGENT_NODE_DIR", "WB_AGENT_FULL_ACCESS_ROOTS",
+      "WB_AGENT_SESSION_MAP_PATH",
       ...extra
     ]);
     const cleaned = {};
@@ -179,8 +177,8 @@ export class WorkBuddyClient {
     }
     cleaned.PATH = parts.join(":");
     if (this.mcpEndpoint) {
-      cleaned.CODEX_REMOTE_CONTACT_QQ_MCP_ENDPOINT = this.mcpEndpoint;
-      cleaned.CODEX_REMOTE_CONTACT_QQ_MCP_SECRET = this.mcpSecret;
+      cleaned.WORKBUDDY_QQ_MCP_ENDPOINT = this.mcpEndpoint;
+      cleaned.WORKBUDDY_QQ_MCP_SECRET = this.mcpSecret;
     }
     return cleaned;
   }
@@ -300,6 +298,34 @@ export class WorkBuddyClient {
     const info = await this.request("initialize", { cwd: this.cwd }, 60_000);
     this.initialized = true;
     this.bridgeInfo = info;
+    this.bridgeAccount = info?.account || null;
+  }
+
+  engineStatus() {
+    return {
+      engine: "workbuddy",
+      engineReady: Boolean(this.initialized && this.child && this.child.exitCode == null),
+      cliPath: this.bridgeInfo?.cli || this.env.WB_AGENT_CLI || null,
+      sdkVersion: this.bridgeInfo?.sdk || null,
+      account: this.bridgeAccount || this.bridgeInfo?.account || null,
+    };
+  }
+
+  async refreshEngineStatus() {
+    if (!this.initialized || !this.child || this.child.exitCode != null) {
+      return this.engineStatus();
+    }
+    const status = await this.request("engine/status", {}, 5000);
+    if (status?.account) this.bridgeAccount = status.account;
+    if (status?.cli || status?.sdk) {
+      this.bridgeInfo = {
+        ...(this.bridgeInfo || {}),
+        cli: status.cli || this.bridgeInfo?.cli,
+        sdk: status.sdk || this.bridgeInfo?.sdk,
+        account: status.account || this.bridgeInfo?.account,
+      };
+    }
+    return this.engineStatus();
   }
 
   async startThread({

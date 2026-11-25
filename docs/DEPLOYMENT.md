@@ -16,7 +16,7 @@ Apple Silicon Mac 的具体实施步骤与已核验配置见 [Colima + Docker + 
 
 ## 登录后自启动
 
-服务标签为 local.codexremotecontact.chat-hub 和 local.codexremotecontact.qq-runtime，属于当前用户会话，是登录后自启动，不是 FileVault 解锁前系统守护程序。
+服务标签为 local.workbuddy.qq-agent-gateway.chat-hub 和 local.workbuddy.qq-agent-gateway.qq-runtime（桌面端还支持 local.workbuddy.qq-agent-gateway.login），属于当前用户会话，是登录后自启动，不是 FileVault 解锁前系统守护程序。
 
 安装时替换模板的项目和 runner 路径，不提交生成的 plist。QQ 恢复只针对已有 Colima profile/容器；确认失效的 PID/socket 移入恢复备份，不删磁盘或登录状态。
 

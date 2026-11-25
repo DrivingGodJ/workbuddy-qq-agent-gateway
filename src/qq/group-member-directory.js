@@ -92,6 +92,26 @@ export class GroupMemberDirectory {
     return Object.keys(this.cache.get(String(groupId))?.members || {}).filter((id) => QQ_ID.test(id));
   }
 
+  async forgetGroup(groupId) {
+    const id = String(groupId || "");
+    this.pathFor(id);
+    return this.enqueue(id, async () => {
+      this.cache.delete(id);
+    });
+  }
+
+  async resetGroup(groupId) {
+    const id = String(groupId || "");
+    this.pathFor(id);
+    return this.enqueue(id, async () => {
+      this.cache.delete(id);
+      const fresh = directoryState(id);
+      await this.save(id, fresh);
+      this.cache.set(id, fresh);
+      return true;
+    });
+  }
+
   enqueue(groupId, action) {
     const previous = this.chains.get(groupId) || Promise.resolve();
     const task = previous.catch(() => {}).then(action);

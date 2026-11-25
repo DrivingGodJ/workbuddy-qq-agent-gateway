@@ -22,10 +22,10 @@ export function rateLimitResumeAt(error) {
 }
 
 export class SessionStore {
-  constructor({ filePath, clock = () => new Date(), defaultCodexConfig = null } = {}) {
+  constructor({ filePath, clock = () => new Date(), defaultAgentConfig = null } = {}) {
     this.filePath = filePath;
     this.clock = clock;
-    this.defaultCodexConfig = normalizeCodexConfig(defaultCodexConfig);
+    this.defaultAgentConfig = normalizeAgentConfig(defaultAgentConfig);
     this.state = { version: 4, updatedAt: null, nextSequence: 1, groups: {} };
     this.saveChain = Promise.resolve();
     this.messageEvents = new EventEmitter();
@@ -40,7 +40,7 @@ export class SessionStore {
       if (error.code !== "ENOENT") throw error;
     }
     if (loaded?.groups && typeof loaded.groups === "object") {
-      this.state = normalizeState(loaded, this.defaultCodexConfig, this.clock().getTime());
+      this.state = normalizeState(loaded, this.defaultAgentConfig, this.clock().getTime());
     } else if (legacyContextPath) {
       await this.importLegacyThreads(legacyContextPath);
     }
@@ -94,7 +94,7 @@ export class SessionStore {
   ensureGroup(groupId) {
     const id = String(groupId || "");
     if (!id) throw new Error("Group id is required");
-    if (!this.state.groups[id]) this.state.groups[id] = createGroupState(id, this.defaultCodexConfig);
+    if (!this.state.groups[id]) this.state.groups[id] = createGroupState(id, this.defaultAgentConfig);
     return this.state.groups[id];
   }
 
@@ -849,6 +849,61 @@ export class SessionStore {
     await this.save();
   }
 
+  async resetSessionState(groupId, {
+    keepSequence = null, threadId = null, createdAt = null, bootstrapComplete = false, bootstrapRevision = 0
+  } = {}) {
+    const id = String(groupId);
+    const group = this.ensureGroup(id);
+    const hasKeep = keepSequence != null && Number.isFinite(Number(keepSequence));
+    const keepSeq = hasKeep ? Number(keepSequence) : null;
+    const discarded = group.pendingMessages.filter((message) => !hasKeep || Number(message.sequence) !== keepSeq);
+    group.pendingMessages = hasKeep
+      ? group.pendingMessages.filter((message) => Number(message.sequence) === keepSeq)
+      : [];
+    for (const message of group.pendingMessages) delete message.readAt;
+    group.outgoingMessages = [];
+    group.sentMessages = [];
+    group.lastReply = "";
+    group.lastCompletedReply = null;
+    group.failedDelivery = null;
+    group.liveSession = null;
+    group.replyFollowup = null;
+    group.pendingTrigger = null;
+    group.deferredThroughSequence = 0;
+    group.periodicCheckedThroughSequence = 0;
+    group.lastError = null;
+    group.resumeError = null;
+    const nextThreadId = String(threadId || "") || null;
+    group.threadId = nextThreadId;
+    group.threadCreatedAt = nextThreadId ? (createdAt || this.nowIso()) : null;
+    group.bootstrapComplete = Boolean(bootstrapComplete);
+    group.bootstrapRevision = Math.max(0, Math.floor(Number(bootstrapRevision) || 0));
+    group.lastActivityAt = this.nowIso();
+    await this.save();
+    this.messageEvents.emit(id);
+    return discarded;
+  }
+
+  async clearConversationHistory(groupId) {
+    const id = String(groupId);
+    const group = this.ensureGroup(id);
+    for (const message of group.pendingMessages) delete message.readAt;
+    group.outgoingMessages = [];
+    group.sentMessages = [];
+    group.lastReply = "";
+    group.lastCompletedReply = null;
+    group.failedDelivery = null;
+    group.liveSession = null;
+    group.replyFollowup = null;
+    group.deferredThroughSequence = 0;
+    group.periodicCheckedThroughSequence = 0;
+    group.lastError = null;
+    group.resumeError = null;
+    group.lastActivityAt = this.nowIso();
+    await this.save();
+    this.messageEvents.emit(id);
+  }
+
   async markBootstrapRequired(groupId) {
     const group = this.ensureGroup(groupId);
     group.bootstrapComplete = false;
@@ -862,13 +917,13 @@ export class SessionStore {
     await this.save();
   }
 
-  async setCodexConfig(groupId, config) {
+  async setAgentConfig(groupId, config) {
     const group = this.ensureGroup(groupId);
-    const previousModel = group.codexConfig.model;
-    group.codexConfig = normalizeCodexConfig(config, this.defaultCodexConfig);
-    if (previousModel !== group.codexConfig.model && this.rateLimitUntil(groupId)) group.lastError = null;
+    const previousModel = group.agentConfig.model;
+    group.agentConfig = normalizeAgentConfig(config, this.defaultAgentConfig);
+    if (previousModel !== group.agentConfig.model && this.rateLimitUntil(groupId)) group.lastError = null;
     await this.save();
-    return structuredClone(group.codexConfig);
+    return structuredClone(group.agentConfig);
   }
 
   async setReplyEnabled(groupId, enabled) {
@@ -917,8 +972,49 @@ export class SessionStore {
   async noteResumeError(groupId, error) {
     const group = this.ensureGroup(groupId);
     group.resumeError = String(error?.message || error).slice(0, 2000);
-    group.lastError = `Codex thread resume failed: ${group.resumeError}`;
+    group.lastError = `Agent thread resume failed: ${group.resumeError}`;
     await this.save();
+  }
+
+  async pruneExpiredMessages({ maxPendingPerGroup = 120, maxAgeMs = 72 * 60 * 60 * 1000 } = {}) {
+    const cutoff = this.clock().getTime() - Math.max(60_000, Number(maxAgeMs) || 72 * 60 * 60 * 1000);
+    const maxItems = Math.max(10, Math.floor(Number(maxPendingPerGroup) || 120));
+    const removedMessages = [];
+    let changed = false;
+
+    for (const group of Object.values(this.state.groups)) {
+      if (group.busy || group.processing) continue;
+
+      const isFresh = (message) => {
+        const ts = Date.parse(message?.receivedAt || message?.timestamp || "");
+        return !Number.isFinite(ts) || ts >= cutoff;
+      };
+
+      const dropped = group.pendingMessages.filter((message) => !isFresh(message));
+      let nextPending = group.pendingMessages.filter(isFresh);
+      if (nextPending.length > maxItems) {
+        const overflow = nextPending.length - maxItems;
+        dropped.push(...nextPending.slice(0, overflow));
+        nextPending = nextPending.slice(overflow);
+      }
+      if (dropped.length > 0) {
+        removedMessages.push(...dropped);
+        group.pendingMessages = nextPending;
+        changed = true;
+        if (group.pendingTrigger && !nextPending.some((message) => String(message.messageId) === String(group.pendingTrigger.messageId))) {
+          group.pendingTrigger = null;
+        }
+      }
+
+      const nextOutgoing = group.outgoingMessages.filter(isFresh).slice(-maxItems);
+      if (nextOutgoing.length !== group.outgoingMessages.length) {
+        group.outgoingMessages = nextOutgoing;
+        changed = true;
+      }
+    }
+
+    if (changed) await this.save();
+    return { removedMessages };
   }
 
   async save() {
@@ -937,12 +1033,12 @@ export class SessionStore {
   }
 }
 
-function createGroupState(groupId, defaultCodexConfig = null) {
+function createGroupState(groupId, defaultAgentConfig = null) {
   return {
     groupId,
     replyEnabled: true,
     replyRevision: 0,
-    codexConfig: normalizeCodexConfig(defaultCodexConfig),
+    agentConfig: normalizeAgentConfig(defaultAgentConfig),
     threadId: null,
     threadCreatedAt: null,
     lastActivityAt: null,
@@ -970,7 +1066,7 @@ function createGroupState(groupId, defaultCodexConfig = null) {
   };
 }
 
-function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
+function normalizeState(value, defaultAgentConfig = null, nowMs = Date.now()) {
   const output = {
     version: 4,
     updatedAt: value.updatedAt || null,
@@ -978,8 +1074,8 @@ function normalizeState(value, defaultCodexConfig = null, nowMs = Date.now()) {
     groups: {}
   };
   for (const [groupId, raw] of Object.entries(value.groups || {})) {
-    const group = { ...createGroupState(groupId, defaultCodexConfig), ...raw, groupId };
-    group.codexConfig = normalizeCodexConfig(raw.codexConfig, defaultCodexConfig);
+    const group = { ...createGroupState(groupId, defaultAgentConfig), ...raw, groupId };
+    group.agentConfig = normalizeAgentConfig(raw.agentConfig, defaultAgentConfig);
     group.replyEnabled = raw.replyEnabled !== false;
     group.replyRevision = Math.max(0, Math.floor(Number(raw.replyRevision) || 0));
     const followup = raw.replyFollowup;
@@ -1036,7 +1132,7 @@ function normalizeHomeAssistantAttempts(value, nowMs) {
   return [...entries.values()];
 }
 
-function normalizeCodexConfig(value, fallback = null) {
+function normalizeAgentConfig(value, fallback = null) {
   const source = value && typeof value === "object" ? value : {};
   const defaults = fallback && typeof fallback === "object" ? fallback : {};
   const rawLimit = source.contextTokenLimit ?? defaults.contextTokenLimit ?? null;
@@ -1056,6 +1152,8 @@ function normalizeCodexConfig(value, fallback = null) {
     homeAssistantPermission: ["disabled", "owner", "group"].includes(source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
       ? (source.homeAssistantPermission ?? defaults.homeAssistantPermission ?? "owner")
       : "disabled",
+    groupEssenceEnabled: Boolean(source.groupEssenceEnabled ?? defaults.groupEssenceEnabled ?? false),
+    groupMuteEnabled: Boolean(source.groupMuteEnabled ?? defaults.groupMuteEnabled ?? false),
     speakerGreetings: normalizeSpeakerGreetings(rawGreetings)
   };
 }

@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { buildStickerLabelPrompt, parseStickerLabelResult } from "./sticker-label.js";
 
 export class EphemeralStickerLabeler {
-  constructor({ codex, stickerManager, workspaceRoot, getSettings = () => ({ model: "hy3" }), onEvent = () => {} } = {}) {
-    this.codex = codex;
+  constructor({ agent, stickerManager, workspaceRoot, getSettings = () => ({ model: "hy3" }), onEvent = () => {} } = {}) {
+    this.agent = agent;
     this.stickerManager = stickerManager;
     this.workspaceRoot = resolve(workspaceRoot);
     this.getSettings = getSettings;
@@ -17,7 +17,7 @@ export class EphemeralStickerLabeler {
   }
 
   async labelMessages(messages, { targetType, targetId, deferCommit = false } = {}) {
-    if (typeof this.codex?.deleteThread !== "function") {
+    if (typeof this.agent?.deleteThread !== "function") {
       throw new Error("当前 Agent 引擎不支持彻底删除临时表情识别会话");
     }
     const requests = this.stickerManager?.claimLabelRequests
@@ -44,7 +44,7 @@ export class EphemeralStickerLabeler {
     await mkdir(jobDir, { recursive: true });
 
     try {
-      threadId = await this.codex.startThread({
+      threadId = await this.agent.startThread({
         threadId: threadIdHint,
         model,
         effort: "auto",
@@ -54,7 +54,7 @@ export class EphemeralStickerLabeler {
         threadSandbox: { type: "readOnly" },
         ephemeral: true
       });
-      const result = await this.codex.runTurn({
+      const result = await this.agent.runTurn({
         groupId,
         threadId,
         prompt: buildStickerLabelPrompt(requests),
@@ -73,7 +73,7 @@ export class EphemeralStickerLabeler {
     } finally {
       if (threadId) {
         try {
-          await this.codex.deleteThread(threadId, { purgeProject: true, cwd: jobDir, ephemeral: true });
+          await this.agent.deleteThread(threadId, { purgeProject: true, cwd: jobDir, ephemeral: true });
         } catch (error) {
           cleanupError = error;
         }

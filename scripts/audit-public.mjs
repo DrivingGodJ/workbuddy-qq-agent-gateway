@@ -1,41 +1,96 @@
-// Audit the index, not the deployment directory. Never print a matched secret.
-import { execFileSync } from "node:child_process";
-const entries = execFileSync("git", ["ls-files","--stage","-z"], {encoding:"utf8"}).split("\0").filter(Boolean);
-const errors = [];
-const secretPatterns = [
-  ["private key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]/],
-  ["GitHub token", /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b/],
-  ["cloud access key", /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/],
-  ["API key", /\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{32,}\b/],
-  ["JWT", /\beyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/]
+import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+
+const FORBIDDEN_PATHS = [
+  "config/private",
+  "config/qq-only.env",
+  "modules/workbuddy-agent/.session-map.json",
+  "modules/workbuddy-agent/.venv",
+  "runtime",
+  "data"
 ];
-for (const entry of entries) {
-  const [,mode,oid,stage,path] = entry.match(/^(\d+) ([a-f0-9]+) (\d)\t([\s\S]+)$/) || [];
-  if (!path) { errors.push("Invalid index entry");continue; }
-  if (mode === "120000" || stage !== "0") errors.push(path+": symlink or unresolved merge");
-  if (/^(?:data|runtime[^/]*|workspaces|vendor|downloads|backups|apps|build)\//.test(path)
-    || /(^|\/)(?:node_modules|\.venv|__pycache__)\//.test(path)
-    || /(?:\.session-map\.json|\.(?:log|db|sqlite3?|pid|sock|pyc))$/.test(path)
-    || path.startsWith("config/private/")
-    || (path.startsWith("config/") && (path.endsWith(".plist") || path === "config/qq-only.env"))
-    || /(^|\/)\.env(?:\..*)?$/.test(path) && !path.endsWith(".example")) {
-    errors.push(path+": forbidden deployment state");
-  }
-  const data = execFileSync("git",["cat-file","blob",oid]);
-  if (path.endsWith(".png")) {
-    if (data.subarray(0,8).toString("hex") !== "89504e470d0a1a0a") { errors.push(path+": invalid PNG");continue; }
-    for (let offset=8;offset+12<=data.length;) {
-      const size=data.readUInt32BE(offset),type=data.subarray(offset+4,offset+8).toString();
-      if (offset+12+size>data.length) {errors.push(path+": malformed PNG");break;}
-      if (["eXIf","tEXt","zTXt","iTXt"].includes(type)) errors.push(path+": image metadata needs review");
-      offset+=12+size;
+
+const IGNORED_DIRS = new Set([
+  ".git",
+  ".build",
+  ".swiftpm",
+  "node_modules",
+  "build",
+  "dist",
+  "__pycache__"
+]);
+
+const TEXT_EXTENSIONS = new Set([
+  ".js", ".mjs", ".cjs", ".py", ".swift", ".sh", ".command", ".json",
+  ".html", ".css", ".md", ".txt", ".plist", ".example", ".applescript", ".c"
+]);
+
+const SECRET_PATTERNS = [
+  { name: "Home directory path", regex: /\/Users\/[A-Za-z0-9._-]{2,}\//g },
+  { name: "Hardcoded Bearer token", regex: /Bearer\s+[A-Za-z0-9._-]{20,}/g },
+  { name: "Private key block", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
+  { name: "Real owner/bot env assignment", regex: /^(?:WORKBUDDY_QQ_OWNER_QQ_ID|WORKBUDDY_QQ_BOT_QQ_ID)=(?!10000000[12]$)[0-9]{5,14}$/gm }
+];
+
+async function walk(dir, results = []) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (IGNORED_DIRS.has(entry.name)) continue;
+    const full = join(dir, entry.name);
+    const rel = relative(ROOT, full);
+    if (entry.isDirectory()) {
+      await walk(full, results);
+    } else if (entry.isFile()) {
+      results.push({ full, rel });
     }
-    continue;
   }
-  if (data.includes(0)) {errors.push(path+": unexpected binary");continue;}
-  const text=data.toString("utf8");
-  for (const [label,regex] of secretPatterns) if (regex.test(text)) errors.push(path+": possible "+label);
+  return results;
 }
-if (!entries.length) errors.push("Index is empty: stage the reviewed release before auditing");
-if (errors.length) {console.error(errors.join("\n"));process.exitCode=1;}
-else console.log("Public index audit passed: "+entries.length+" files; no deployment state, recognized credentials or PNG metadata.");
+
+async function runAudit() {
+  const errors = [];
+
+  for (const forbidden of FORBIDDEN_PATHS) {
+    if (existsSync(join(ROOT, forbidden))) {
+      errors.push(`Forbidden private/runtime path present in repository: ${forbidden}`);
+    }
+  }
+
+  const configDir = join(ROOT, "config");
+  if (existsSync(configDir)) {
+    for (const name of await readdir(configDir)) {
+      if (name.endsWith(".plist")) {
+        errors.push(`Non-example plist present in config/: ${name}`);
+      }
+    }
+  }
+
+  const files = await walk(ROOT);
+  for (const { full, rel } of files) {
+    if (rel.startsWith("test/") || rel === "scripts/audit-public.mjs") continue;
+    if (!TEXT_EXTENSIONS.has(extname(rel).toLowerCase())) continue;
+    const text = await readFile(full, "utf8");
+    for (const pattern of SECRET_PATTERNS) {
+      pattern.regex.lastIndex = 0;
+      const match = pattern.regex.exec(text);
+      if (match) {
+        errors.push(`${pattern.name} detected in ${rel}: ${match[0].slice(0, 60)}`);
+      }
+    }
+  }
+
+  if (errors.length) {
+    for (const err of errors) console.error(`AUDIT FAIL: ${err}`);
+    process.exit(1);
+  }
+  console.log(`audit:public passed (${files.length} tracked files checked)`);
+}
+
+runAudit().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

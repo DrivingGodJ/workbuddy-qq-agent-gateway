@@ -53,9 +53,8 @@ npm run audit:public
 
 - [完整功能、配置、权限与限制](../docs/readme-reference.zh-CN.md)
 - [Home Assistant](../docs/HOME_ASSISTANT.md) · [本地定制](../docs/LOCAL_CUSTOMIZATION.md)
-- [来源清单](../docs/PROVENANCE.md) · [许可说明](../LICENSE-NOTICE.md)
-- [问题反馈](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
+- [安装包下载](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases) · [问题反馈](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/issues)
 
-## 许可与致谢
+## 说明
 
-感谢原作者 [Epic0522](https://github.com/Epic0522)。上游尚无许可证，本仓库不擅自声明整仓为 MIT/Apache。使用或分发前请阅读许可与来源说明并确认必要授权；第三方依赖和人格素材另有各自条款。
+本仓库围绕 WorkBuddy QQ Agent Gateway 独立维护，不附带第三方产品许可、模型额度或私有数据；第三方依赖及内置模板人格素材各有其适用条款（见 [persona/QQ-BRIDGE-NOTICE.txt](../persona/QQ-BRIDGE-NOTICE.txt)）。

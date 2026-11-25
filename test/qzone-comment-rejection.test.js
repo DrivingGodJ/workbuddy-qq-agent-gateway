@@ -27,7 +27,7 @@ test("explicit QQ Space comment rejection preserves receipts and lets the scan c
     async finishAction(key, receipt) { receipts[key] = receipt; }
   } });
   const store = {
-    snapshot: () => ({ pendingMessages: [], codexConfig: { calendarRemindersEnabled: false } }),
+    snapshot: () => ({ pendingMessages: [], agentConfig: { calendarRemindersEnabled: false } }),
     assertReplyEnabled() {}
   };
   const target = { id: "10001", type: "group", worker: {

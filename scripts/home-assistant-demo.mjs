@@ -14,7 +14,7 @@ if (!options.url || !options.snapshot || !options.speaker || !options.player
   || !lightIds.length || lightIds.length > 3 || lightIds.some((id) => !/^light\.[a-z0-9_]+$/u.test(id))
   || !/^media_player\.[a-z0-9_]+$/u.test(options.player)) throw new Error("Specify URL, snapshot, 1–3 lights, speaker and player.");
 let token;
-try { token = execFileSync("/usr/bin/security", ["find-generic-password", "-s", "Codex Remote Contact QQ", "-a", "home-assistant-api-token", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
+try { token = execFileSync("/usr/bin/security", ["find-generic-password", "-s", "WorkBuddy QQ Gateway", "-a", "home-assistant-api-token", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
 catch { throw new Error("Home Assistant Keychain credential unavailable."); }
 const ha = new HomeAssistantClient({ enabled: true, baseUrl: options.url, token, allowedSpeakers: [options.speaker] });
 token = undefined;

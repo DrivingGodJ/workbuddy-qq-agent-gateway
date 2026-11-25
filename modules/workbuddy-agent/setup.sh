@@ -40,4 +40,4 @@ echo "==> 完成"
 "$VENV/bin/python" -c "import codebuddy_agent_sdk as s; print('SDK', getattr(s,'__version__','?'))"
 echo
 echo "网关侧指向它即可："
-echo "  export CODEX_REMOTE_CONTACT_WB_PYTHON=\"$VENV/bin/python\""
+echo "  export WORKBUDDY_QQ_WB_PYTHON=\"$VENV/bin/python\""

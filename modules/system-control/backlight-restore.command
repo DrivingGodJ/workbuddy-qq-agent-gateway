@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PID_FILE="$PROJECT_DIR/data/keep-awake.pid"
 BRIGHTNESS_FILE="$PROJECT_DIR/data/previous-brightness.txt"
-BACKLIGHT="$PROJECT_DIR/modules/system-control/bin/codexremotecontact-backlight"
+BACKLIGHT="$PROJECT_DIR/modules/system-control/bin/workbuddy-qq-backlight"
 
 if [ -x "$BACKLIGHT" ]; then
   TARGET="0.7"
@@ -23,7 +23,7 @@ if [ -x "$BACKLIGHT" ]; then
     "$BACKLIGHT" list || true
   fi
 else
-  echo "找不到 codexremotecontact 背光工具：$BACKLIGHT"
+  echo "找不到 WorkBuddy QQ 背光工具：$BACKLIGHT"
 fi
 
 if [ -f "$PID_FILE" ]; then

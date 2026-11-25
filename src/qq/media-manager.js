@@ -15,11 +15,23 @@ const EXT_BY_MIME = new Map([
 ]);
 
 export class QqMediaManager {
-  constructor({ rootDir, maxImageBytes = 20 * 1024 * 1024, maxAttachmentBytes = 1024 * 1024 * 1024, orphanTtlMs = 7 * 24 * 60 * 60 * 1000, fetchImpl = fetch } = {}) {
+  constructor({
+    rootDir,
+    maxImageBytes = 20 * 1024 * 1024,
+    maxAttachmentBytes = 1024 * 1024 * 1024,
+    orphanTtlMs = 24 * 60 * 60 * 1000,
+    maxTotalBytes = 200 * 1024 * 1024,
+    maxReferencedAgeMs = 48 * 60 * 60 * 1000,
+    clock = () => Date.now(),
+    fetchImpl = fetch
+  } = {}) {
     this.rootDir = resolve(rootDir);
     this.maxImageBytes = maxImageBytes;
     this.maxAttachmentBytes = maxAttachmentBytes;
     this.orphanTtlMs = orphanTtlMs;
+    this.maxTotalBytes = Math.max(1024 * 1024, Number(maxTotalBytes) || 200 * 1024 * 1024);
+    this.maxReferencedAgeMs = Math.max(60_000, Number(maxReferencedAgeMs) || 48 * 60 * 60 * 1000);
+    this.clock = clock;
     this.fetchImpl = fetchImpl;
   }
 
@@ -192,28 +204,76 @@ export class QqMediaManager {
     }
   }
 
-  async cleanupOrphans(referencedImages = []) {
+  async cleanupOrphans(referencedImages = [], { forceOrphans = false } = {}) {
     const referencedDirs = new Set(
       referencedImages
         .map((image) => image?.localPath)
         .filter(Boolean)
         .map((path) => resolve(path, ".."))
     );
-    const now = Date.now();
+    const now = this.clock();
+    const survivors = [];
+    let removedDirs = 0;
+    let freedBytes = 0;
+
     const groupEntries = await readdir(this.rootDir, { withFileTypes: true }).catch(() => []);
     for (const groupEntry of groupEntries) {
       if (!groupEntry.isDirectory()) continue;
       const groupDir = join(this.rootDir, groupEntry.name);
       const messageEntries = await readdir(groupDir, { withFileTypes: true }).catch(() => []);
       for (const messageEntry of messageEntries) {
-        if (!messageEntry.isDirectory()) continue;
-        const messageDir = join(groupDir, messageEntry.name);
-        if (referencedDirs.has(resolve(messageDir))) continue;
-        const info = await stat(messageDir).catch(() => null);
-        if (!info || now - info.mtimeMs < this.orphanTtlMs) continue;
-        if (this.isInsideRoot(messageDir)) await rm(messageDir, { recursive: true, force: true });
+        const entryPath = join(groupDir, messageEntry.name);
+        if (!messageEntry.isDirectory()) {
+          const fileInfo = await stat(entryPath).catch(() => null);
+          if (fileInfo && (forceOrphans || now - fileInfo.mtimeMs >= this.orphanTtlMs)) {
+            if (this.isInsideRoot(entryPath)) {
+              await rm(entryPath, { force: true }).catch(() => {});
+              freedBytes += fileInfo.size;
+            }
+          }
+          continue;
+        }
+        const resolvedMsgDir = resolve(entryPath);
+        const info = await stat(entryPath).catch(() => null);
+        if (!info) continue;
+        const sizeBytes = await measureDirectoryBytes(entryPath);
+        const referenced = referencedDirs.has(resolvedMsgDir);
+        const ageMs = now - info.mtimeMs;
+        const expiredOrphan = !referenced && (forceOrphans || ageMs >= this.orphanTtlMs);
+        const expiredStaleReferenced = referenced && forceOrphans && ageMs >= this.maxReferencedAgeMs;
+        if ((expiredOrphan || expiredStaleReferenced) && this.isInsideRoot(entryPath)) {
+          await rm(entryPath, { recursive: true, force: true });
+          removedDirs += 1;
+          freedBytes += sizeBytes;
+        } else {
+          survivors.push({ path: entryPath, groupDir, mtimeMs: info.mtimeMs, sizeBytes, referenced });
+        }
       }
     }
+
+    let remainingBytes = survivors.reduce((sum, item) => sum + item.sizeBytes, 0);
+    if (remainingBytes > this.maxTotalBytes) {
+      survivors.sort((a, b) => Number(a.referenced) - Number(b.referenced) || a.mtimeMs - b.mtimeMs);
+      for (const item of survivors) {
+        if (remainingBytes <= this.maxTotalBytes) break;
+        if (!this.isInsideRoot(item.path)) continue;
+        await rm(item.path, { recursive: true, force: true }).catch(() => {});
+        remainingBytes = Math.max(0, remainingBytes - item.sizeBytes);
+        removedDirs += 1;
+        freedBytes += item.sizeBytes;
+      }
+    }
+
+    for (const groupEntry of groupEntries) {
+      if (!groupEntry.isDirectory()) continue;
+      const groupDir = join(this.rootDir, groupEntry.name);
+      const rest = await readdir(groupDir).catch(() => null);
+      if (rest && rest.length === 0 && this.isInsideRoot(groupDir)) {
+        await rm(groupDir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+
+    return { removedDirs, freedBytes, remainingBytes };
   }
 
   messageDir(groupId, messageId) {
@@ -224,6 +284,22 @@ export class QqMediaManager {
     const target = resolve(path);
     return target === this.rootDir || target.startsWith(`${this.rootDir}/`);
   }
+}
+
+async function measureDirectoryBytes(dir) {
+  let total = 0;
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      total += await measureDirectoryBytes(full);
+    } else if (entry.isFile()) {
+      const info = await stat(full).catch(() => null);
+      if (info) total += info.size;
+    }
+  }
+  return total;
 }
 
 function chooseSource(ref, resolvedRef) {

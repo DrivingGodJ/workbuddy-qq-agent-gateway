@@ -29,7 +29,7 @@ export async function removeGatewayTarget({ type, id, targetStore, subscriptions
       .map((item) => metadataFields(item, ["id", "targetType", "targetId", "sourceGroupId", "mode", "intakeMode", "collectionDelayMinutes", "enabled", "createdAt", "updatedAt"]));
     const binding = qzoneStore?.snapshot();
     await writeFile(archiveFile, JSON.stringify({version:2,removedAt:new Date().toISOString(),type,id,
-      conversation:metadataFields(conversation, ["groupId", "replyEnabled", "replyRevision", "codexConfig", "threadId", "threadCreatedAt", "lastActivityAt", "bootstrapComplete", "bootstrapRevision", "migratedFromLegacy"]),
+      conversation:metadataFields(conversation, ["groupId", "replyEnabled", "replyRevision", "agentConfig", "threadId", "threadCreatedAt", "lastActivityAt", "bootstrapComplete", "bootstrapRevision", "migratedFromLegacy"]),
       subscriptions:selectedSubscriptions,
       qzoneBinding:binding?.targetType === type && binding.targetId === id
         ? metadataFields(binding, ["targetType", "targetId", "autoPostEnabled", "autoEngageEnabled"]) : null},null,2), {mode:0o600,flag:"wx"});

@@ -2,17 +2,17 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CLIENT_APP="$PROJECT_DIR/build/CodexRemoteContactClient.app"
+CLIENT_APP="/Applications/WorkBuddyQQGateway.app"
 
 cd "$PROJECT_DIR"
 
 "$PROJECT_DIR/modules/chat-hub-start.command"
 
 if [ -d "$CLIENT_APP" ]; then
-  echo "Opening codexremotecontact client..."
+  echo "Opening WorkBuddy QQ Gateway..."
   /usr/bin/open -a "$CLIENT_APP"
 else
-  echo "Client app is not built yet: $CLIENT_APP"
+  echo "Client app is not installed yet: $CLIENT_APP"
 fi
 
 echo ""

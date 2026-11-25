@@ -36,14 +36,14 @@ export function homeAssistantRequest({ store, messageReader, targetId, targetTyp
   const message = (messageReader?.directMessages || messageReader?.messages)?.get(String(messageId || ""));
   const snapshot = store.snapshot(targetId);
   const pending = snapshot.pendingMessages;
-  const permission = snapshot.codexConfig?.homeAssistantPermission || "owner";
+  const permission = snapshot.agentConfig?.homeAssistantPermission || "owner";
   const isOwner = ownerId && String(message?.senderId) === String(ownerId) && message?.trust === "OWNER";
   const isGroupMember = permission === "group" && targetType === "group" && message?.source === "qq"
     && /^[1-9][0-9]{4,13}$/u.test(String(message.senderId || ""));
   const ageMs = Date.now() - Date.parse(message?.receivedAt || "");
   if (scheduledTask || !["owner", "group"].includes(permission) || permission === "group" && targetType !== "group" || !message || message.eventType === "poke" || !(isOwner || isGroupMember)
     || String(message.groupId) !== String(targetId)
-    || !["qq", "codex-ui"].includes(message.source) || !(Number(message.sequence) > 0)
+    || !["qq", "gateway-ui"].includes(message.source) || !(Number(message.sequence) > 0)
     || !Number.isFinite(ageMs) || ageMs < -30_000 || ageMs > 15 * 60_000
     || !pending.some((item) => String(item.messageId) === String(message.messageId))
     || store.isRecalled?.(targetId, message.messageId)) {
@@ -55,7 +55,7 @@ export function homeAssistantRequest({ store, messageReader, targetId, targetTyp
 export const ownerHomeRequest = homeAssistantRequest;
 
 export class HomeAssistantClient {
-  constructor({ baseUrl = "", token = "", enabled = false, allowedButtons = [], allowedSpeakers = [], fetchImpl = fetch, timeoutMs = 3000 } = {}) {
+  constructor({ baseUrl = "", token = "", enabled = false, greetingSpeaker = "", fetchImpl = fetch, timeoutMs = 3000 } = {}) {
     this.enabled = Boolean(enabled);
     this.token = String(token).trim();
     this.baseUrl = String(baseUrl).trim().replace(/\/+$/u, "");
@@ -63,18 +63,19 @@ export class HomeAssistantClient {
       const url = new URL(this.baseUrl);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || !["", "/"].includes(url.pathname)) throw new Error("Home Assistant 地址须为不含凭证、路径或查询参数的 HTTP/HTTPS 根地址。");
     }
-    this.allowedButtons = new Set(allowedButtons);
-    const speakers = typeof allowedSpeakers === "string" ? allowedSpeakers.split(",").map((value) => value.trim()).filter(Boolean) : allowedSpeakers;
-    if (!Array.isArray(speakers) || speakers.some((value) => typeof value !== "string" || !SPEAKER_ID.test(value))) throw new Error("小爱发言白名单只能包含 Xiaomi 播放文本实体；执行文本指令等入口不可配置。");
-    this.allowedSpeakers = new Set(speakers);
+    this.greetingSpeaker = String(greetingSpeaker).trim();
     this.fetch = fetchImpl;
     this.timeoutMs = Math.max(100, Math.min(3000, Number(timeoutMs) || 3000));
     this.services = null;
     this.servicesAt = 0;
   }
 
+  get configured() {
+    return this.enabled && Boolean(this.baseUrl && this.token);
+  }
+
   async request(path, { method = "GET", body } = {}) {
-    if (!this.enabled || !this.baseUrl || !this.token) denied("智能家居未配置或专用访问凭证缺失。");
+    if (!this.configured) denied("智能家居未配置或专用访问凭证缺失。");
     let response;
     try {
       response = await this.fetch(this.baseUrl + path, { method, redirect: "error",
@@ -91,9 +92,40 @@ export class HomeAssistantClient {
     try { return JSON.parse(text); } catch { throw new Error("Home Assistant 响应不是有效 JSON；操作结果未确认。"); }
   }
 
+  async readiness() {
+    if (!this.configured) {
+      return { ready: false, speakerReady: false, reason: "请在设置中启用并连接 Home Assistant。" };
+    }
+    let services;
+    try {
+      services = await this.loadServices({ refresh: true });
+    } catch {
+      return { ready: false, speakerReady: false, reason: "网关无法连接 Home Assistant 或验证凭证。" };
+    }
+    try {
+      if (await this.resolveGreetingSpeaker(services)) {
+        return { ready: true, speakerReady: true, reason: null };
+      }
+    } catch { /* The speaker's state could not be verified. */ }
+    return { ready: true, speakerReady: false, reason: this.greetingSpeaker ? "当前配置的小爱播报设备不可用。" : "尚未检测到可用的小爱播报设备。" };
+  }
+
+  async resolveGreetingSpeaker(services = null) {
+    const available = services ?? await this.loadServices();
+    if (!available.some((item) => item.domain === "notify" && Object.hasOwn(item.services || {}, "send_message"))) return null;
+    if (this.greetingSpeaker) {
+      if (!this.canSpeak(this.greetingSpeaker)) return null;
+      const state = await this.request(`/api/states/${encodeURIComponent(this.greetingSpeaker)}`);
+      return state?.entity_id === this.greetingSpeaker && state.state !== "unavailable" ? this.greetingSpeaker : null;
+    }
+    const states = await this.request("/api/states");
+    if (!Array.isArray(states)) throw new Error("Home Assistant 设备列表无效。");
+    const ids = states.filter((state) => this.canSpeak(state.entity_id) && state.state !== "unavailable").map((state) => state.entity_id);
+    return ids.sort()[0] ?? null;
+  }
+
   actionsFor(state) {
     const domain = state.entity_id.split(".")[0];
-    if (domain === "button" && !this.allowedButtons.has(state.entity_id)) return [];
     return Object.keys(RULES[domain] || {});
   }
 
@@ -108,11 +140,11 @@ export class HomeAssistantClient {
   }
 
   canSpeak(entityId) {
-    return SPEAKER_ID.test(String(entityId || "")) && this.allowedSpeakers.has(entityId);
+    return SPEAKER_ID.test(String(entityId || ""));
   }
 
-  async loadServices() {
-    if (!this.services || Date.now() - this.servicesAt > 60_000) {
+  async loadServices({ refresh = false } = {}) {
+    if (refresh || !this.services || Date.now() - this.servicesAt > 60_000) {
       const services = await this.request("/api/services");
       if (!Array.isArray(services)) throw new Error("Home Assistant 服务列表无效。");
       this.services = services;
@@ -141,7 +173,7 @@ export class HomeAssistantClient {
     const readable = new Set([...Object.keys(RULES), "sensor", "binary_sensor", "notify"]);
     if (domain && !readable.has(domain)) denied("仅可查询家居设备和传感器，不能读取人员位置、摄像头或系统配置。");
     if (entity_id && !readable.has(entity_id.split(".")[0])) denied("此实体不在家居设备与传感器读取范围内。");
-    if (entity_id?.startsWith("notify.") && !this.canSpeak(entity_id)) denied("只能查询已配置的小爱播放文本实体，不能读取或使用任意通知及执行指令入口。");
+    if (entity_id?.startsWith("notify.") && !this.canSpeak(entity_id)) denied("只能查询小爱播放文本实体，不能读取或使用任意通知及执行指令入口。");
     const raw = entity_id ? [await this.request(`/api/states/${encodeURIComponent(entity_id)}`)] : await this.request("/api/states");
     if (!Array.isArray(raw)) throw new Error("Home Assistant 设备列表无效。");
     const values = raw.filter((state) => readable.has(String(state.entity_id).split(".")[0])
@@ -157,7 +189,7 @@ export class HomeAssistantClient {
     const domain = entity_id.split(".")[0];
     const domainRules = Object.hasOwn(RULES, domain) ? RULES[domain] : null;
     const rules = domainRules && Object.hasOwn(domainRules, service) ? domainRules[service] : null;
-    if (!rules || domain === "button" && !this.allowedButtons.has(entity_id)) denied("该设备或服务不在家居控制白名单中；系统重启、脚本、安防与任意服务均不可调用。");
+    if (!rules) denied("网关不支持该实体类型或服务。");
     // Reject an explicitly opposite request, not the absence of magic verbs.
     const opening = /打开|开灯|开启|开起来|点亮|拉开/u;
     const closing = /关闭|关灯|关掉|关上|熄灯|熄灭/u;
@@ -197,7 +229,7 @@ export class HomeAssistantClient {
 
   async speak({ entity_id, text }, { requestText, beforeSend = () => {} } = {}) {
     if (requestText != null) assertActionRequest(requestText, { speech: true });
-    if (typeof entity_id !== "string" || !this.canSpeak(entity_id)) denied("发言只能指向已配置的小爱播放文本实体，不能执行小爱指令或发送其他通知。");
+    if (typeof entity_id !== "string" || !this.canSpeak(entity_id)) denied("发言只能指向小爱播放文本实体，不能执行小爱指令或发送其他通知。");
     if (typeof text !== "string" || !text.trim() || text.length > MAX_SPEECH_LENGTH || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) denied(`发言文本须为 1–${MAX_SPEECH_LENGTH} 个字符，且不含控制字符。`);
     const state = await this.request(`/api/states/${encodeURIComponent(entity_id)}`);
     if (state.entity_id !== entity_id || state.state === "unavailable") denied("小爱发言实体不可用或无法核实，未发送文本。");

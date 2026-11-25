@@ -2,48 +2,65 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <title>QQ WorkBuddy Agent Gateway</title>
+    <title>WorkBuddy QQ Agent Gateway</title>
     <link rel="stylesheet" href="/client.css" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">C</span>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v5A2.5 2.5 0 0 1 13.5 14H9l-3 2.5V14A2.5 2.5 0 0 1 4 11.5v-5Z" />
+              <path d="M16 9.5h1.5A2.5 2.5 0 0 1 20 12v4a2.5 2.5 0 0 1-2.5 2.5H16v2l-2.5-2h-4A2.5 2.5 0 0 1 7 16v-2" />
+            </svg>
+          </span>
           <div>
             <p class="eyebrow">WORKBUDDY REMOTE CONTACT</p>
             <h1>QQ Agent 网关</h1>
           </div>
         </div>
-        <div class="top-actions">
-          <button id="toggleNavigationButton" class="button ghost topbar-button mobile-nav-toggle" type="button" aria-expanded="false" aria-controls="conversationSidebar">会话</button>
-          <button id="globalSettingsButton" class="button ghost topbar-button" type="button">设置</button>
-          <button id="qzoneButton" class="button ghost topbar-button" type="button" aria-pressed="false">QQ 空间</button>
-          <button id="stickerGalleryButton" class="button ghost topbar-button" type="button" aria-pressed="false">
-            表情展示台 <span id="stickerGalleryButtonCount" class="button-count">0</span>
+
+        <nav class="root-tabs" role="tablist" aria-label="主功能页面">
+          <button id="conversationsTabButton" class="root-tab selected" type="button" role="tab" aria-selected="true">会话</button>
+          <button id="qzoneButton" class="root-tab" type="button" role="tab" aria-selected="false">动态</button>
+          <button id="stickerGalleryButton" class="root-tab" type="button" role="tab" aria-selected="false">
+            表情包 <span id="stickerGalleryButtonCount" class="button-count">0</span>
           </button>
-          <label class="dispatch-control" title="关闭后仍接收和保存 QQ 消息，但不会启动新的 Codex 请求">
-            <span class="dispatch-copy"><strong id="agentDispatchLabel">Agent 已开启</strong><small>消息始终记录</small></span>
-            <input id="agentDispatchToggle" type="checkbox" checked aria-label="Agent 总开关" />
-            <span class="dispatch-switch" aria-hidden="true"></span>
-          </label>
+        </nav>
+
+        <div class="top-actions" id="topActions">
           <span id="connectionBadge" class="badge neutral" role="status">正在连接</span>
-          <button id="refreshButton" class="icon-button" type="button" aria-label="刷新状态" title="刷新状态">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" /></svg>
+          <button id="globalSettingsButton" class="button ghost topbar-button" type="button" aria-label="全局设置">
+            <span class="wide-label">全局设置</span><span class="phone-only">设置</span>
           </button>
+          <div class="global-controls" id="globalControls">
+            <label class="dispatch-control" title="关闭后仍接收和保存 QQ 消息，但不会启动新的 WorkBuddy 请求">
+              <span class="dispatch-copy"><strong id="agentDispatchLabel">Agent 已开启</strong><small>消息始终记录</small></span>
+              <input id="agentDispatchToggle" type="checkbox" checked aria-label="Agent 总开关" />
+              <span class="dispatch-switch" aria-hidden="true"></span>
+            </label>
+            <button id="lanLogoutButton" class="button ghost topbar-button" type="button" hidden>退出登录</button>
+            <button id="refreshButton" class="icon-button" type="button" aria-label="刷新状态" title="刷新状态">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" /></svg>
+            </button>
+          </div>
         </div>
       </header>
 
-      <section id="workspace" class="workspace">
+      <section id="workspace" class="workspace" data-mobile-pane="list">
         <aside id="conversationSidebar" class="sidebar panel" aria-label="QQ Agent 会话与通知源" tabindex="0">
           <div class="sidebar-heading">
             <div>
               <p class="eyebrow">CONVERSATIONS</p>
-              <h2>会话与通知源</h2>
+              <h2>会话列表</h2>
             </div>
-            <span id="groupCount" class="quiet-count">0</span>
+            <div class="sidebar-heading-actions">
+              <span id="groupCount" class="quiet-count">0</span>
+              <button id="returnToChatButton" class="button ghost phone-only" type="button" hidden>返回聊天</button>
+            </div>
           </div>
           <label class="nav-search"><span class="sr-only">搜索会话或通知源</span><input id="conversationSearch" type="search" placeholder="搜索名称或 QQ 号" /></label>
 
@@ -57,7 +74,7 @@
                 <label for="groupCandidate">选择机器人已加入的群
                   <select id="groupCandidate" required disabled><option value="">正在读取群列表…</option></select>
                 </label>
-                <p class="field-note">只显示尚未管理、且不是只读通知源的群。加入后群成员可按该会话的权限触发<span data-agent-name>老代</span>。</p>
+                <p class="field-note">只显示尚未管理、且不是只读通知源的群。加入后群成员可按该会话的权限触发<span data-agent-name>机器人</span>。</p>
                 <p id="groupFormStatus" class="form-status" role="status" aria-live="polite"></p>
                 <button id="reloadGroupCandidatesButton" class="mini-button" type="button">刷新群列表</button>
                 <div class="compact-actions"><button id="saveGroupButton" class="button primary" type="submit" disabled>加入白名单</button><button id="cancelGroupButton" class="button ghost" type="button">取消</button></div>
@@ -71,7 +88,11 @@
                 <button id="addPrivateButton" class="mini-button" type="button">添加</button>
               </div>
               <form id="privateForm" class="compact-form" hidden>
-                <label for="privateUserId">QQ 号<input id="privateUserId" inputmode="numeric" pattern="[0-9]{5,14}" placeholder="输入要允许私聊的 QQ 号" required /></label>
+                <label for="privateFriendCandidate">从机器人好友列表选择（可选）
+                  <select id="privateFriendCandidate" disabled><option value="">正在读取好友列表…</option></select>
+                </label>
+                <button id="reloadFriendCandidatesButton" class="mini-button" type="button">刷新好友列表</button>
+                <label for="privateUserId">QQ 号<input id="privateUserId" inputmode="numeric" pattern="[0-9]{5,14}" placeholder="输入或选择要允许私聊的 QQ 号" required /></label>
                 <label for="privateDisplayName">备注<input id="privateDisplayName" placeholder="可选" /></label>
                 <p id="privateFormStatus" class="form-status" role="status" aria-live="polite"></p>
                 <div class="compact-actions"><button id="savePrivateButton" class="button primary" type="submit">加入白名单</button><button id="cancelPrivateButton" class="button ghost" type="button">取消</button></div>
@@ -85,156 +106,36 @@
             </section>
           </div>
 
-          <details id="sessionDetails" class="session-details">
-            <summary>当前 Agent 会话详情</summary>
-            <dl class="session-grid">
-              <div><dt>threadId</dt><dd id="threadId">—</dd></div>
-              <div><dt>会话占用</dt><dd id="threadLockState">检查中</dd></div>
-              <div><dt>创建时间</dt><dd id="threadCreatedAt">—</dd></div>
-              <div><dt>最近活动</dt><dd id="lastActivityAt">—</dd></div>
-              <div><dt>pending</dt><dd id="pendingCount">0</dd></div>
-              <div><dt>worker</dt><dd id="workerState">idle</dd></div>
-              <div><dt>trigger</dt><dd id="triggerState">—</dd></div>
-            </dl>
-            <div class="stack-actions">
-              <button id="sessionButton" class="button ghost" type="button">查看会话 ID</button>
-              <button id="retryButton" class="button ghost" type="button">重试待处理消息</button>
-              <button id="resetButton" class="button danger" type="button">新建当前会话</button>
-            </div>
-            <div class="target-remove-section">
-              <button id="deleteTargetButton" class="button danger full-button" type="button">删除网关会话</button>
-              <p id="deleteTargetHint" class="field-note">移出白名单并归档本地状态，不退群、不删好友。</p>
-            </div>
-          </details>
-
-          <details id="agentSettingsDetails" class="session-details agent-settings-details">
-            <summary>会话参数 <span id="agentSettingsSummary">—</span></summary>
-            <p id="sharedContextInfo" class="shared-context-info" role="status" hidden></p>
-            <form id="contextLinkForm" class="agent-settings-form context-link-form" hidden>
-              <label for="contextLinkGroup">共享群聊上下文
-                <select id="contextLinkGroup" aria-describedby="contextLinkHelp contextLinkHint"><option value="">独立私聊</option></select>
-              </label>
-              <p id="contextLinkHelp" class="field-note">绑定后共用群聊的模型上下文和工作区；群聊、私聊仍分别读取和发送，触发任务按顺序排队。原私聊会话搁置保留。</p>
-              <p id="contextLinkHint" class="field-note">解绑后恢复原私聊会话；已进入群上下文的私聊内容无法从群会话中抹除。文件、家居和通知自动化权限仍按各渠道单独设置。</p>
-              <p id="contextLinkStatus" class="form-status" role="status" aria-live="polite"></p>
-              <button id="saveContextLinkButton" class="button primary full-button" type="submit" disabled>保存上下文关联</button>
-            </form>
-            <form id="agentSettingsForm" class="agent-settings-form">
-              <label for="agentModel">模型
-                <select id="agentModel" required></select>
-              </label>
-              <label for="agentReasoningEffort">思考强度
-                <select id="agentReasoningEffort" required></select>
-              </label>
-              <label for="agentContextTokenLimit">自动压缩阈值
-                <select id="agentContextTokenLimit" required></select>
-              </label>
-              <label for="agentPermissionMode">执行权限（独立设置）
-                <select id="agentPermissionMode" required></select>
-                <small class="field-note">所有会话固定使用 Agent；这里决定可读取和修改的本机范围。</small>
-              </label>
-              <label class="settings-switch" for="agentCalendarRemindersEnabled">
-                <span><strong>日历与待办自动化权限</strong><small>开启后每轮聊天都可查询和添加日历、待办，不限通知；日历进入“学习 / 社团 / 活动”，提醒进入“待办”并加旗标</small></span>
-                <input id="agentCalendarRemindersEnabled" type="checkbox" role="switch" checked />
-              </label>
-              <label for="agentHomeAssistantPermission">智能家居与小爱发言权限
-                <select id="agentHomeAssistantPermission" required></select>
-                <small class="field-note">独立于本机执行权限。全群成员仅对当前群开放，定时任务和通知内容不能授权家居操作。</small>
-              </label>
-              <fieldset id="speakerGreetingSettings" class="speaker-greeting-settings" aria-describedby="speakerGreetingsHint">
-                <legend>小爱定时播报</legend>
-                <div id="speakerGreetingRows" class="speaker-greeting-rows"></div>
-                <button id="addSpeakerGreetingButton" class="button" type="button">添加播报</button>
-                <p id="speakerGreetingsHint" class="field-note" role="status">按北京时间在所选星期播报。</p>
-              </fieldset>
-              <div id="agentModeExplanation" class="parameter-explanation" aria-live="polite"></div>
-              <p id="agentSettingsHint" class="form-hint">保存后从下一轮起生效；历史 thread 不变。</p>
-              <p id="agentSettingsStatus" class="form-status" role="status" aria-live="polite"></p>
-              <button id="saveAgentSettingsButton" class="button primary full-button" type="submit" disabled>保存会话参数</button>
-            </form>
-          </details>
-
-          <details id="personaDetails" class="session-details agent-settings-details persona-details">
-            <summary><span data-agent-name>老代</span>人格 <span id="personaSummary">所有会话共用</span></summary>
-            <div class="agent-settings-form persona-form">
-              <p class="field-note">所有群聊、私聊和动态共用同一份人格；不再计算或注入每轮精力、熟悉度和关系状态。固定核心可在本机私人人格文件中编辑。</p>
-              <p class="field-note">不再为人格学习缓存聊天记录或自动总结发言风格。固定人格和口头禅由你手动维护。</p>
-              <form id="personaNameForm" class="persona-editor" autocomplete="off">
-                <label for="personaNameInput">AI 昵称
-                  <input id="personaNameInput" name="name" minlength="2" maxlength="16" required spellcheck="false" />
-                </label>
-                <p class="field-note">保存后，文字喊名、机器人称谓和下一轮人格提示会一起更新。真正 @机器人仍按 QQ 账号识别。</p>
-                <p id="personaNameStatus" class="form-status" role="status" aria-live="polite"></p>
-                <button id="savePersonaNameButton" class="button primary" type="submit" disabled>保存昵称</button>
-              </form>
-              <form id="personaCatchphraseForm" class="persona-editor">
-                <div class="persona-learning-head"><span>固定口头禅</span><strong id="personaCatchphraseStatus">当前已生效</strong></div>
-                <p class="field-note">填写短句和适用场景，格式与现有人格一致。保存后从下一轮回复起生效。</p>
-                <div id="personaCatchphraseRows" class="persona-catchphrase-rows"></div>
-                <button id="addPersonaCatchphraseButton" class="button ghost" type="button">添加口头禅</button>
-                <p id="personaCatchphraseSaveStatus" class="form-status" role="status" aria-live="polite"></p>
-                <button id="savePersonaCatchphraseButton" class="button primary" type="submit" disabled>保存口头禅</button>
-              </form>
-              <details class="persona-preview-details">
-                <summary>查看共用人格</summary>
-                <pre id="personaPromptPreview" class="persona-prompt-preview">—</pre>
-                <p class="field-note">当前固定人格和口头禅。本轮消息与权限另行提供。</p>
-              </details>
-            </div>
-          </details>
-
-          <details id="stickerLabelDetails" class="session-details agent-settings-details">
-            <summary>临时任务模型 <span id="stickerLabelSummary">hy3 · 两项共用</span></summary>
-            <form id="stickerLabelForm" class="agent-settings-form">
-              <label for="stickerLabelModel">共用模型
-                <select id="stickerLabelModel" required></select>
-              </label>
-              <div class="parameter-explanation">
-                <p><strong>同时用于两项任务</strong>新表情识图、每天 05:00 超过 100 个表情时的筛选。仅影响之后启动的临时任务，不改变群聊、私聊和动态会话的模型。</p>
-                <p><strong>不积累上下文</strong>各任务使用独立临时会话，完成后清理。识图可与聊天回复并行；已识别的表情会等当前回复发送完成后再入库。表情筛选会等待正在进行的任务结束。</p>
-              </div>
-              <p id="stickerLabelStatus" class="form-status" role="status" aria-live="polite"></p>
-              <button id="saveStickerLabelButton" class="button primary full-button" type="submit" disabled>保存共用模型</button>
-            </form>
-          </details>
-
-          <details id="subscriptionDetails" class="session-details subscription-details">
-            <summary>通知源订阅 <span id="subscriptionCount">0</span></summary>
-            <div id="subscriptionList" class="subscription-list"></div>
-            <button id="addSubscriptionButton" class="button ghost full-button" type="button">+ 添加通知源</button>
-            <form id="subscriptionForm" class="subscription-form" hidden>
-              <input id="subscriptionId" type="hidden" />
-              <label>通知来源<select id="subscriptionSource" required></select></label>
-              <p class="field-note">通知按以下规则自动处理，并向当前会话发送摘要。</p>
-              <label>消息范围<select id="subscriptionIntake"><option value="ADMIN_ONLY">群管触发（附带上下文）</option><option value="ALL">全部消息</option></select></label>
-              <label id="subscriptionDelayLabel">最后消息后等待（分钟）<input id="subscriptionDelay" type="number" min="0.1" max="1440" step="0.1" value="10" required /></label>
-              <label class="checkbox-label"><input id="subscriptionEnabled" type="checkbox" checked />启用订阅</label>
-              <div class="compact-actions"><button class="button primary" type="submit">保存订阅</button><button id="cancelSubscriptionButton" class="button ghost" type="button">取消</button></div>
-            </form>
-          </details>
-
           <div class="service-list" aria-label="服务状态">
             <div><span>Hub</span><strong id="hubStatus">检查中</strong></div>
             <div><span>QQ / OneBot</span><strong id="oneBotStatus">检查中</strong></div>
-            <div><span>WorkBuddy</span><strong id="codexStatus">空闲</strong></div>
+            <div><span>WorkBuddy</span><strong id="engineStatus">空闲</strong></div>
           </div>
         </aside>
 
         <section class="conversation-panel panel">
           <header class="conversation-heading">
+            <button id="toggleNavigationButton" class="icon-button phone-only" type="button" aria-label="返回会话列表" aria-controls="conversationSidebar">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+            </button>
             <div class="conversation-title">
               <p id="selectedGroupId" class="eyebrow">QQ AGENT</p>
               <h2 id="selectedGroupName">选择一个会话</h2>
               <p id="activityStatus" class="activity-status" role="status">等待消息</p>
             </div>
             <div class="conversation-actions">
-              <button id="settingsButton" class="button ghost" type="button">设置与用量</button>
               <label id="replyControl" class="dispatch-control reply-control" hidden>
                 <span class="dispatch-copy"><strong id="replyEnabledLabel">允许回复</strong><small id="replyEnabledHint">仅影响当前会话</small></span>
                 <input id="replyEnabledToggle" type="checkbox" role="switch" aria-label="允许回复当前会话" checked />
                 <span class="dispatch-switch" aria-hidden="true"></span>
               </label>
+              <button id="headerResetButton" class="button ghost" type="button" hidden title="清空当前会话的工作目录、聊天记录与上下文并新建会话">新建会话</button>
+              <button id="headerDeleteButton" class="button danger" type="button" hidden title="移出白名单并清理工作目录与记录">删除会话</button>
               <button id="cancelButton" class="button danger" type="button" disabled>立即终止</button>
+              <button id="settingsButton" class="button ghost" type="button" aria-controls="conversationInspector" aria-expanded="true">
+                <span id="settingsButtonLabel" class="wide-label">收起操作栏</span>
+                <span class="phone-only">详情</span>
+              </button>
             </div>
           </header>
 
@@ -254,58 +155,289 @@
             <button id="sendButton" class="button primary" type="submit">发送</button>
           </form>
         </section>
+
+        <aside id="conversationInspector" class="inspector panel" aria-label="当前会话操作栏" tabindex="0">
+          <header class="inspector-heading">
+            <div>
+              <p class="eyebrow">SESSION PANEL</p>
+              <h2 id="settingsTargetName">当前会话操作栏</h2>
+            </div>
+            <button id="closeInspectorButton" class="button ghost phone-only" type="button">返回聊天</button>
+          </header>
+          <div id="mobileReplyControls" class="phone-only"></div>
+          <div class="inspector-tabs" role="tablist" aria-label="会话操作分类">
+            <button id="inspectorTabBtnConfig" class="inspector-tab selected" type="button" role="tab" aria-selected="true" data-inspector-tab="config">参数</button>
+            <button id="inspectorTabBtnSubscriptions" class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="subscriptions">订阅 <span id="subscriptionCount" class="inline-count">0</span></button>
+            <button id="inspectorTabBtnSession" class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="session">会话</button>
+            <button id="inspectorTabBtnDiagnostics" class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="diagnostics">诊断</button>
+          </div>
+          <div class="inspector-scroll">
+            <p id="inspectorEmptyState" class="empty compact" hidden>请在左侧选择一个 Agent 群聊或私聊，即可在此常驻面板配置模型权限、订阅通知、查看诊断并清理会话。</p>
+
+            <section id="inspectorPaneConfig" class="inspector-pane" role="tabpanel" aria-labelledby="inspectorTabBtnConfig">
+              <div id="agentSettingsDetails" class="inspector-section agent-settings-details">
+                <p id="agentSettingsSummary" class="inspector-summary-pill">—</p>
+                <p id="sharedContextInfo" class="shared-context-info" role="status" hidden></p>
+                <form id="contextLinkForm" class="agent-settings-form context-link-form" hidden>
+                  <label for="contextLinkGroup">共享群聊上下文
+                    <select id="contextLinkGroup" aria-describedby="contextLinkHelp contextLinkHint"><option value="">独立私聊</option></select>
+                  </label>
+                  <p id="contextLinkHelp" class="field-note">绑定后共用群聊的模型上下文和工作区；群聊、私聊仍分别读取和发送，触发任务按顺序排队。原私聊会话搁置保留。</p>
+                  <p id="contextLinkHint" class="field-note">解绑后恢复原私聊会话；已进入群上下文的私聊内容无法从群会话中抹除。文件、家居和通知自动化权限仍按各渠道单独设置。</p>
+                  <p id="contextLinkStatus" class="form-status" role="status" aria-live="polite"></p>
+                  <button id="saveContextLinkButton" class="button primary full-button" type="submit" disabled>保存上下文关联</button>
+                </form>
+                <form id="agentSettingsForm" class="agent-settings-form">
+                  <label for="agentModel">模型
+                    <select id="agentModel" required></select>
+                  </label>
+                  <label for="agentReasoningEffort">思考强度
+                    <select id="agentReasoningEffort" required></select>
+                  </label>
+                  <label for="agentContextTokenLimit">自动压缩阈值
+                    <select id="agentContextTokenLimit" required></select>
+                  </label>
+                  <label for="agentPermissionMode">执行权限（独立设置）
+                    <select id="agentPermissionMode" required></select>
+                    <small class="field-note">所有会话固定使用 Agent；这里决定可读取和修改的本机范围。</small>
+                  </label>
+                  <label class="settings-switch" for="agentCalendarRemindersEnabled">
+                    <span><strong>日历与待办自动化权限</strong><small>开启后每轮聊天都可查询和添加日历、待办，不限通知；日历进入“学习 / 社团 / 活动”，提醒进入“待办”并加旗标</small></span>
+                    <input id="agentCalendarRemindersEnabled" type="checkbox" role="switch" checked />
+                  </label>
+                  <label for="agentHomeAssistantPermission">智能家居与小爱发言权限
+                    <select id="agentHomeAssistantPermission" required></select>
+                    <small class="field-note">独立于本机执行权限。全群成员仅对当前群开放，定时任务和通知内容不能授权家居操作。</small>
+                  </label>
+                  <fieldset id="groupAdminPermissions" class="speaker-greeting-settings" hidden>
+                    <legend>群管理员自主权限 <span id="groupBotRoleBadge" class="inline-count">未检测</span></legend>
+                    <label class="settings-switch" for="agentGroupEssenceEnabled">
+                      <span><strong>允许设置精华消息</strong><small>开启后自动在系统提示词中引导机器人主动将优质或重要消息设为精华</small></span>
+                      <input id="agentGroupEssenceEnabled" type="checkbox" role="switch" />
+                    </label>
+                    <label class="settings-switch" for="agentGroupMuteEnabled">
+                      <span><strong>允许管理群禁言</strong><small>开启后自动在系统提示词中引导机器人对违反公序良俗、恶意辱骂或刷屏的普通成员酌情限时禁言（最长 10 分钟）</small></span>
+                      <input id="agentGroupMuteEnabled" type="checkbox" role="switch" />
+                    </label>
+                    <p id="groupAdminPermissionsHint" class="field-note" role="status"></p>
+                  </fieldset>
+                  <fieldset id="speakerGreetingSettings" class="speaker-greeting-settings" aria-describedby="speakerGreetingsHint">
+                    <legend>小爱定时播报</legend>
+                    <div id="speakerGreetingRows" class="speaker-greeting-rows"></div>
+                    <button id="addSpeakerGreetingButton" class="button" type="button">添加播报</button>
+                    <p id="speakerGreetingsHint" class="field-note" role="status">按北京时间在所选星期播报。</p>
+                  </fieldset>
+                  <div id="agentModeExplanation" class="parameter-explanation" aria-live="polite"></div>
+                  <p id="agentSettingsHint" class="form-hint">保存后从下一轮起生效；历史 thread 不变。</p>
+                  <p id="agentSettingsStatus" class="form-status" role="status" aria-live="polite"></p>
+                  <button id="saveAgentSettingsButton" class="button primary full-button" type="submit" disabled>保存会话参数</button>
+                </form>
+              </div>
+            </section>
+
+            <section id="inspectorPaneSubscriptions" class="inspector-pane" role="tabpanel" aria-labelledby="inspectorTabBtnSubscriptions" hidden>
+              <div id="subscriptionDetails" class="inspector-section subscription-details">
+                <div id="subscriptionList" class="subscription-list"></div>
+                <button id="addSubscriptionButton" class="button ghost full-button" type="button">+ 添加通知源</button>
+                <form id="subscriptionForm" class="subscription-form" hidden>
+                  <input id="subscriptionId" type="hidden" />
+                  <label>通知来源<select id="subscriptionSource" required></select></label>
+                  <p class="field-note">通知按以下规则自动处理，并向当前会话发送摘要。</p>
+                  <label>消息范围<select id="subscriptionIntake"><option value="ADMIN_ONLY">群管触发（附带上下文）</option><option value="ALL">全部消息</option></select></label>
+                  <label id="subscriptionDelayLabel">最后消息后等待（分钟）<input id="subscriptionDelay" type="number" min="0.1" max="1440" step="0.1" value="10" required /></label>
+                  <label class="checkbox-label"><input id="subscriptionEnabled" type="checkbox" checked />启用订阅</label>
+                  <div class="compact-actions"><button class="button primary" type="submit">保存订阅</button><button id="cancelSubscriptionButton" class="button ghost" type="button">取消</button></div>
+                </form>
+              </div>
+            </section>
+
+            <section id="inspectorPaneSession" class="inspector-pane" role="tabpanel" aria-labelledby="inspectorTabBtnSession" hidden>
+              <div id="sessionDetails" class="inspector-section">
+                <dl class="session-grid">
+                  <div><dt>threadId</dt><dd id="threadId">—</dd></div>
+                  <div><dt>会话占用</dt><dd id="threadLockState">检查中</dd></div>
+                  <div><dt>创建时间</dt><dd id="threadCreatedAt">—</dd></div>
+                  <div><dt>最近活动</dt><dd id="lastActivityAt">—</dd></div>
+                  <div><dt>pending</dt><dd id="pendingCount">0</dd></div>
+                  <div><dt>worker</dt><dd id="workerState">idle</dd></div>
+                  <div><dt>trigger</dt><dd id="triggerState">—</dd></div>
+                </dl>
+                <div class="stack-actions">
+                  <button id="sessionButton" class="button ghost" type="button">查看会话 ID</button>
+                  <button id="retryButton" class="button ghost" type="button">重试待处理消息</button>
+                  <button id="resetButton" class="button danger" type="button">新建会话（清空工作区与记录）</button>
+                </div>
+                <div class="target-remove-section">
+                  <button id="deleteTargetButton" class="button danger full-button" type="button">删除网关会话并清理记录</button>
+                  <p id="deleteTargetHint" class="field-note">从白名单移出并彻底清理工作目录、聊天记录与临时媒体，不退群、不删好友。</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="inspectorPaneDiagnostics" class="inspector-pane" role="tabpanel" aria-labelledby="inspectorTabBtnDiagnostics" hidden>
+              <div id="diagnosticsDetails" class="inspector-section">
+                <div id="usageSummary" class="usage-grid"></div>
+                <p class="field-note">SDK 原始字段；缺失显示“未提供”，不等同于 WorkBuddy 扣费。启动次数仅统计本次网关运行。输入预览不含系统提示词、历史对话或图片像素。</p>
+                <button id="refreshInputButton" class="button ghost full-button" type="button">查看最新提交内容</button>
+                <pre id="turnInputPreview" class="persona-prompt-preview">点击上方按钮读取本轮实际提交的消息文本。</pre>
+              </div>
+            </section>
+          </div>
+        </aside>
       </section>
 
       <dialog id="settingsDrawer" class="settings-drawer" aria-labelledby="settingsTitle">
-        <header class="settings-heading"><div><p class="eyebrow">SETTINGS &amp; DIAGNOSTICS</p><h2 id="settingsTitle">设置与用量</h2><p id="settingsTargetName" class="field-note"></p></div><button id="closeSettingsButton" class="button ghost" type="button">关闭</button></header>
+        <header class="settings-heading">
+          <div>
+            <p class="eyebrow">GLOBAL SETTINGS &amp; STORAGE</p>
+            <h2 id="settingsTitle">全局设置与存储</h2>
+            <p class="field-note">人格、临时模型与磁盘防膨胀策略对全部会话生效</p>
+          </div>
+          <button id="closeSettingsButton" class="button ghost" type="button" autofocus>关闭</button>
+        </header>
+        <div id="mobileGlobalControls" class="phone-only"></div>
+        <div class="settings-tabs" role="tablist" aria-label="全局设置分类">
+          <button id="settingsTabBtnGlobal" class="settings-tab selected" type="button" role="tab" aria-selected="true" data-settings-tab="global">全局人格与模型</button>
+          <button id="settingsTabBtnStorage" class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="storage">存储与防膨胀清理</button>
+        </div>
         <div class="settings-scroll">
-          <section id="conversationSettingsBody" aria-label="当前会话设置"></section>
-          <details id="diagnosticsDetails" class="session-details">
-            <summary>本轮用量与实际输入</summary>
-            <div id="usageSummary" class="usage-grid"></div>
-            <p class="field-note">SDK 原始字段；缺失显示“未提供”，不等同于 WorkBuddy 扣费。启动次数仅统计本次网关运行。输入预览不含系统提示词、历史对话或图片像素。</p>
-            <button id="refreshInputButton" class="button ghost" type="button">查看最新提交内容</button>
-            <pre id="turnInputPreview" class="persona-prompt-preview">展开后读取本轮实际提交的消息文本。</pre>
-          </details>
-          <h3 class="settings-section-title">所有会话共用</h3>
-          <section id="globalSettingsBody" aria-label="共用人格与临时任务模型"></section>
+          <section id="globalSettingsBody" class="settings-tab-pane" aria-label="全局人格与模型">
+            <details id="personaDetails" class="session-details agent-settings-details persona-details" open>
+              <summary><span data-agent-name>机器人</span>人格 <span id="personaSummary">所有会话共用</span></summary>
+              <div class="agent-settings-form persona-form">
+                <p class="field-note">所有群聊、私聊和动态共用同一份人格；固定核心和口头禅由你手动维护，不再无限积累聊天记录。</p>
+                <form id="personaNameForm" class="persona-editor" autocomplete="off">
+                  <label for="personaNameInput">AI 昵称
+                    <input id="personaNameInput" name="name" minlength="2" maxlength="16" required spellcheck="false" />
+                  </label>
+                  <p class="field-note">保存后，文字喊名、机器人称谓和下一轮人格提示会一起更新。真正 @机器人仍按 QQ 账号识别。</p>
+                  <p id="personaNameStatus" class="form-status" role="status" aria-live="polite"></p>
+                  <button id="savePersonaNameButton" class="button primary" type="submit" disabled>保存昵称</button>
+                </form>
+                <form id="personaCatchphraseForm" class="persona-editor">
+                  <div class="persona-learning-head"><span>固定口头禅</span><strong id="personaCatchphraseStatus">当前已生效</strong></div>
+                  <p class="field-note">填写短句和适用场景，格式与现有人格一致。保存后从下一轮回复起生效。</p>
+                  <div id="personaCatchphraseRows" class="persona-catchphrase-rows"></div>
+                  <button id="addPersonaCatchphraseButton" class="button ghost" type="button">添加口头禅</button>
+                  <p id="personaCatchphraseSaveStatus" class="form-status" role="status" aria-live="polite"></p>
+                  <button id="savePersonaCatchphraseButton" class="button primary" type="submit" disabled>保存口头禅</button>
+                </form>
+                <details class="persona-preview-details">
+                  <summary>查看共用人格</summary>
+                  <pre id="personaPromptPreview" class="persona-prompt-preview">—</pre>
+                  <p class="field-note">当前固定人格和口头禅。本轮消息与权限另行提供。</p>
+                </details>
+                <div class="persona-editor persona-portability">
+                  <div class="persona-learning-head"><span>导入 / 导出人格文件</span><strong id="personaPortabilityBadge">默认模板</strong></div>
+                  <p class="field-note">可将当前完整人格导出为备份文件（兼容 .laodai-persona.json），更新版本或迁移后随时导回。</p>
+                  <div class="compact-actions">
+                    <button id="exportPersonaButton" class="button ghost" type="button">导出人格文件</button>
+                    <button id="importPersonaButton" class="button ghost" type="button">导入人格文件</button>
+                    <button id="resetPersonaButton" class="button danger" type="button" hidden>恢复默认人格</button>
+                  </div>
+                  <input id="importPersonaFileInput" type="file" accept=".json,.laodai-persona.json" hidden />
+                  <p id="personaPortabilityStatus" class="form-status" role="status" aria-live="polite"></p>
+                </div>
+              </div>
+            </details>
+
+            <details id="stickerLabelDetails" class="session-details agent-settings-details" open>
+              <summary>临时任务模型 <span id="stickerLabelSummary">hy3 · 两项共用</span></summary>
+              <form id="stickerLabelForm" class="agent-settings-form">
+                <label for="stickerLabelModel">共用模型
+                  <select id="stickerLabelModel" required></select>
+                </label>
+                <div class="parameter-explanation">
+                  <p><strong>同时用于两项任务</strong>新表情识图、每天 05:00 超过 100 个表情时的筛选。仅影响之后启动的临时任务，不改变群聊、私聊和动态会话的模型。</p>
+                  <p><strong>不积累上下文</strong>各任务使用独立临时会话，完成后立即清理目录和线程。</p>
+                </div>
+                <p id="stickerLabelStatus" class="form-status" role="status" aria-live="polite"></p>
+                <button id="saveStickerLabelButton" class="button primary full-button" type="submit" disabled>保存共用模型</button>
+              </form>
+            </details>
+          </section>
+
+          <section id="storageSettingsBody" class="settings-tab-pane" aria-label="存储与防膨胀清理" hidden>
+            <div class="storage-summary-box">
+              <div class="storage-summary-head">
+                <div>
+                  <strong>自动防膨胀策略（运行中持续生效）</strong>
+                  <p id="storagePolicyNote" class="field-note">QQ 临时图片与文件仅保留 24 小时且封顶 200 MB；空闲队列最多保留 72 小时 / 120 条；QQ 空间今日动态跨日自动清理；运行日志封顶 5 MB。</p>
+                </div>
+              </div>
+              <div id="storageSummaryCards" class="storage-cards">
+                <p class="empty compact">正在读取磁盘占用…</p>
+              </div>
+              <div class="compact-actions">
+                <button id="refreshStorageButton" class="button ghost" type="button">刷新占用统计</button>
+                <button id="cleanupStorageButton" class="button primary" type="button">立即清理临时缓存</button>
+              </div>
+              <p id="storageActionStatus" class="form-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
         </div>
       </dialog>
 
       <dialog id="deleteTargetDialog" class="delete-target-dialog" aria-labelledby="deleteTargetTitle" aria-describedby="deleteTargetDescription">
         <form id="deleteTargetForm">
-          <h2 id="deleteTargetTitle">删除网关会话？</h2>
+          <h2 id="deleteTargetTitle">删除网关会话并清理数据？</h2>
           <p id="deleteTargetName" class="delete-target-name"></p>
-          <p id="deleteTargetDescription">将从白名单移除，归档本地消息和会话状态，并解除此会话的通知订阅及动态绑定。不会退出 QQ 群、删除好友，也不会销毁 WorkBuddy 历史或共享工作区。以后可重新添加为新会话。</p>
+          <p id="deleteTargetDescription">将从白名单移出，并彻底清理该会话的工作目录、本地聊天记录、临时媒体与 WorkBuddy 历史记录，同时解除通知订阅与动态绑定。不会退出 QQ 群，也不会删除 QQ 好友。</p>
           <p id="deleteTargetStatus" class="form-status" role="status" aria-live="polite"></p>
-          <div class="delete-target-actions"><button id="cancelDeleteTargetButton" class="button ghost" type="button" autofocus>取消</button><button id="confirmDeleteTargetButton" class="button danger" type="submit">删除网关会话</button></div>
+          <div class="delete-target-actions"><button id="cancelDeleteTargetButton" class="button ghost" type="button" autofocus>取消</button><button id="confirmDeleteTargetButton" class="button danger" type="submit">确认删除并清理</button></div>
         </form>
       </dialog>
 
-      <section id="qzonePanel" class="sticker-gallery panel" aria-labelledby="qzoneTitle" hidden>
+      <section id="qzonePanel" class="sticker-gallery panel" aria-labelledby="qzoneTitle" data-mobile-qzone-pane="feed" hidden>
         <header class="gallery-heading">
           <div>
-            <p class="eyebrow">QQ SPACE · LAO DAI</p>
-            <h2 id="qzoneTitle">QQ 空间自动动态</h2>
-            <p class="gallery-subtitle">手动发动态对你的所有 Agent 会话开放；定时任务沿用下方选定会话的上下文。</p>
+            <p class="eyebrow">QQ SPACE · TODAY</p>
+            <h2 id="qzoneTitle">QQ 空间动态与任务</h2>
+            <p class="gallery-subtitle">查看今日动态、点赞和评论，管理定时检查与发布。</p>
           </div>
-          <button id="closeQzoneButton" class="button ghost" type="button">返回会话</button>
+          <button id="refreshQzoneTodayButton" class="button ghost" type="button">刷新动态</button>
         </header>
+        <div class="qzone-mobile-nav phone-only" role="group" aria-label="QQ 空间页面">
+          <button class="button ghost" type="button" data-mobile-qzone-pane="feed" aria-pressed="true">今日动态</button>
+          <button class="button ghost" type="button" data-mobile-qzone-pane="tasks" aria-pressed="false">定时任务</button>
+        </div>
         <div class="gallery-scroll qzone-scroll">
-          <div id="qzoneBanner" class="recognition-status idle" role="status" aria-live="polite"></div>
-          <form id="qzoneForm" class="qzone-form">
-            <p class="qzone-visibility">可见范围：所有人可见。手动和定时新发的动态都一样；已有动态不会自动改动。</p>
-            <label for="qzoneTarget">定时任务使用的 Agent 会话</label>
-            <select id="qzoneTarget" name="target"><option value="">暂不绑定</option></select>
-            <p class="qzone-help">你直接触发受管理的可写会话后，<span data-agent-name>老代</span>可酌情发动态；其他人不能授权。自动任务只使用这里选定的会话。</p>
-            <label class="qzone-check"><input id="qzoneAutoPost" type="checkbox" /> <span>早 / 中 / 晚让<span data-agent-name>老代</span>自行决定是否发动态</span></label>
-            <p id="qzonePostTimes" class="qzone-help"></p>
-            <label class="qzone-check"><input id="qzoneAutoEngage" type="checkbox" /> <span>每小时查看新好友动态，按喜好决定点赞或评论</span></label>
-            <p id="qzoneLastSeenTime" class="qzone-help"></p>
-            <p class="qzone-help">北京时间 07:00–次日 01:00 整点检查；每条新动态可独立点赞、普通评论或跳过。SnowLuma 暂不支持读取或回复指定评论。</p>
-            <div class="qzone-actions"><button id="saveQzoneButton" class="button primary" type="submit">保存 QQ 空间设置</button><span id="qzoneSaveStatus" role="status" aria-live="polite"></span></div>
-          </form>
-          <section class="qzone-history" aria-label="最近任务记录"><h3>最近任务</h3><div id="qzoneEvents"></div></section>
+          <div class="qzone-layout">
+            <section class="qzone-today-card" aria-labelledby="qzoneTodayHeading">
+              <div class="qzone-today-head">
+                <div>
+                  <h3 id="qzoneTodayHeading">今日动态与评论</h3>
+                  <p id="qzoneTodaySubtitle" class="qzone-help">仅保留今日（北京时间）刷到的动态、图片数和评论（含<span data-agent-name>机器人</span>发出的评论），跨日自动清理不占空间。</p>
+                </div>
+                <div class="qzone-today-controls">
+                  <div class="qzone-filter-group" role="group" aria-label="筛选今日动态">
+                    <button id="qzoneFilterAll" class="mini-button selected" type="button" data-qzone-filter="all">全部</button>
+                    <button id="qzoneFilterBot" class="mini-button" type="button" data-qzone-filter="engaged"><span data-agent-name>机器人</span>参与</button>
+                    <button id="qzoneFilterBotPosts" class="mini-button" type="button" data-qzone-filter="posts"><span data-agent-name>机器人</span>发布</button>
+                  </div>
+                </div>
+              </div>
+              <p id="qzoneTodayStatus" class="form-status" role="status" aria-live="polite"></p>
+              <div id="qzoneTodayFeeds" class="qzone-feed-list"></div>
+            </section>
+
+            <div class="qzone-side-column">
+              <div id="qzoneBanner" class="recognition-status idle" role="status" aria-live="polite"></div>
+              <form id="qzoneForm" class="qzone-form">
+                <p class="qzone-visibility">可见范围：所有人可见。手动和定时新发的动态都一样；已有动态不会自动改动。</p>
+                <label for="qzoneTarget">定时任务使用的 Agent 会话</label>
+                <select id="qzoneTarget" name="target"><option value="">暂不绑定</option></select>
+                <p class="qzone-help">你直接触发受管理的可写会话后，<span data-agent-name>机器人</span>可酌情发动态；其他人不能授权。自动任务只使用这里选定的会话。</p>
+                <label class="qzone-check"><input id="qzoneAutoPost" type="checkbox" /> <span>早 / 中 / 晚让<span data-agent-name>机器人</span>自行决定是否发动态</span></label>
+                <p id="qzonePostTimes" class="qzone-help"></p>
+                <label class="qzone-check"><input id="qzoneAutoEngage" type="checkbox" /> <span>每小时查看新好友动态，按喜好决定点赞或评论</span></label>
+                <p id="qzoneLastSeenTime" class="qzone-help"></p>
+                <p class="qzone-help">北京时间 07:00–次日 01:00 整点检查；每条新动态可独立点赞、普通评论或跳过。</p>
+                <div class="qzone-actions"><button id="saveQzoneButton" class="button primary" type="submit">保存 QQ 空间设置</button><span id="qzoneSaveStatus" role="status" aria-live="polite"></span></div>
+              </form>
+              <section class="qzone-history" aria-label="最近任务记录"><h3>最近任务</h3><div id="qzoneEvents"></div></section>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -316,7 +448,6 @@
             <h2 id="stickerGalleryTitle">表情展示台</h2>
             <p class="gallery-subtitle">查看表情、识别进度和黑名单；可恢复收录或彻底忘记</p>
           </div>
-          <button id="closeStickerGalleryButton" class="button ghost" type="button">返回会话</button>
         </header>
         <div class="gallery-scroll">
           <section class="gallery-summary" aria-label="表情库状态">

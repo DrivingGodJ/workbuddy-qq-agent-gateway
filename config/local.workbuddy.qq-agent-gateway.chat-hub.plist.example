@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.workbuddy.qq-agent-gateway.chat-hub</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>__RUNNER_PATH__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKBUDDY_QQ_PROJECT_DIR</key>
+    <string>__PROJECT_DIR__</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__PROJECT_DIR__/runtime/logs/chat-hub.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_DIR__/runtime/logs/chat-hub.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+</dict>
+</plist>

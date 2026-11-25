@@ -75,15 +75,15 @@ export function selectStickerIdsFromRatings(entries, ratings, keepCount = CURATI
 
 /** Bounded disposable vision batches plus a text-only selection session. */
 export class EphemeralStickerCurator {
-  constructor({ codex, workspaceRoot, getSettings = () => ({ model: "hy3" }), canRun = () => true } = {}) {
-    this.codex = codex;
+  constructor({ agent, workspaceRoot, getSettings = () => ({ model: "hy3" }), canRun = () => true } = {}) {
+    this.agent = agent;
     this.workspaceRoot = resolve(workspaceRoot);
     this.getSettings = getSettings;
     this.canRun = canRun;
   }
 
   async select(entries, { keepCount = CURATION_KEEP, onProgress = () => {} } = {}) {
-    if (!this.codex?.deleteThread) throw new Error("当前引擎不能清理临时筛选会话");
+    if (!this.agent?.deleteThread) throw new Error("当前引擎不能清理临时筛选会话");
     const jobId = randomUUID();
     const cwd = join(this.workspaceRoot, jobId);
     const model = String(this.getSettings()?.model || "hy3");
@@ -93,13 +93,13 @@ export class EphemeralStickerCurator {
     let failure;
     await mkdir(cwd, { recursive: true });
     const runIsolated = async (suffix, input) => {
-      threadId = await this.codex.startThread({ ...options, threadId: `sticker-prune-${jobId}-${suffix}`, threadSandbox: { type: "readOnly" }, ephemeral: true });
+      threadId = await this.agent.startThread({ ...options, threadId: `sticker-prune-${jobId}-${suffix}`, threadSandbox: { type: "readOnly" }, ephemeral: true });
       let result;
       let error;
-      try { result = await this.codex.runTurn({ ...options, threadId, groupId: `sticker-prune:${jobId}`, turnSandbox: { type: "readOnly" }, ...input, onDelta: () => {} }); }
+      try { result = await this.agent.runTurn({ ...options, threadId, groupId: `sticker-prune:${jobId}`, turnSandbox: { type: "readOnly" }, ...input, onDelta: () => {} }); }
       catch (caught) { error = caught; }
       try {
-        await this.codex.deleteThread(threadId, { purgeProject: true, cwd, ephemeral: true });
+        await this.agent.deleteThread(threadId, { purgeProject: true, cwd, ephemeral: true });
         threadId = null;
       } catch (cleanup) { throw new Error(`临时表情筛选会话清理失败：${cleanup.message}`, { cause: error || cleanup }); }
       if (error) throw error;
@@ -148,7 +148,7 @@ export class EphemeralStickerCurator {
     } catch (error) { failure = error; }
     finally {
       if (threadId) {
-        try { await this.codex.deleteThread(threadId, { purgeProject: true, cwd, ephemeral: true }); }
+        try { await this.agent.deleteThread(threadId, { purgeProject: true, cwd, ephemeral: true }); }
         catch (error) { failure = new Error(`临时表情筛选会话清理失败：${error.message}`, { cause: failure || error }); }
       }
       try { await rm(cwd, { recursive: true, force: true }); }

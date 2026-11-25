@@ -136,15 +136,15 @@ unset VNC_PASSWD
 与本方案对应的非秘密网关参数：
 
 ```dotenv
-CODEX_REMOTE_CONTACT_HOST=127.0.0.1
-CODEX_REMOTE_CONTACT_PORT=3789
+WORKBUDDY_QQ_HOST=127.0.0.1
+WORKBUDDY_QQ_PORT=3789
 ONEBOT_API_BASE=http://127.0.0.1:3000
-CODEX_REMOTE_CONTACT_COLIMA_PROFILE=snowluma
-CODEX_REMOTE_CONTACT_DOCKER_CONTEXT=colima-snowluma
-CODEX_REMOTE_CONTACT_SNOWLUMA_CONTAINER=snowluma
-CODEX_REMOTE_CONTACT_DOCKER_PATH=/opt/homebrew/bin/docker
-CODEX_REMOTE_CONTACT_NODE_PATH=/opt/homebrew/bin/node
-CODEX_REMOTE_CONTACT_QQ_FILE_STAGING_ROOT=/tmp/codexremotecontact-qq-files
+WORKBUDDY_QQ_COLIMA_PROFILE=snowluma
+WORKBUDDY_QQ_DOCKER_CONTEXT=colima-snowluma
+WORKBUDDY_QQ_SNOWLUMA_CONTAINER=snowluma
+WORKBUDDY_QQ_DOCKER_PATH=/opt/homebrew/bin/docker
+WORKBUDDY_QQ_NODE_PATH=/opt/homebrew/bin/node
+WORKBUDDY_QQ_FILE_STAGING_ROOT=/tmp/workbuddy-qq-files
 ```
 
 这些只是配套参数，不是完整配置。账号没有默认值；Hub、OneBot API 和回调凭证的具体要求见 [README](readme-reference.zh-CN.md#配置与启动) 与 [安全说明](../SECURITY.md)。免令牌面板仅允许本机回环访问，不解除 OneBot 回调鉴权。
@@ -158,7 +158,7 @@ CODEX_REMOTE_CONTACT_QQ_FILE_STAGING_ROOT=/tmp/codexremotecontact-qq-files
 | VM 的 Docker 数据卷 | `snowluma-data` → `/app/data` | SnowLuma 配置、缓存和数据库；升级保留 |
 | VM 的 Docker 数据卷 | `snowluma-qq-config` → `/app/.config` | Linux QQ 配置；升级保留 |
 | VM 的 Docker 数据卷 | `snowluma-qq-data` → `/app/.local/share` | QQ 登录态与数据；升级保留 |
-| 容器临时目录 | `/tmp/codexremotecontact-qq-files/<job-id>/` | 当前发送任务的临时副本；成功、失败均尝试清理 |
+| 容器临时目录 | `/tmp/workbuddy-qq-files/<job-id>/` | 当前发送任务的临时副本；成功、失败均尝试清理 |
 
 QQ 容器没有直接挂载整台 Mac 或 NAS。发送时网关先按当前会话权限核验真实路径，再通过 `docker cp` 把选定文件复制到容器专用暂存目录，上传结束后清理该任务副本，原文件不动。图片优化副本也会清理；收到的消息原图仍按 pending / 订阅引用规则保留，不能在表情识别完成时提前删掉。
 
@@ -170,8 +170,8 @@ QQ 容器没有直接挂载整台 Mac 或 NAS。发送时网关先按当前会�
 
 | 系统服务 | 行为 |
 | --- | --- |
-| `local.codexremotecontact.chat-hub` | `RunAtLoad` 启动 Mac 网关；异常退出由 launchd 恢复，不等待 VM 就绪 |
-| `local.codexremotecontact.qq-runtime` | 登录时运行，之后每 60 秒检查既有 VM 与容器；只恢复、不重建 |
+| `local.workbuddy.qq-agent-gateway.chat-hub` | `RunAtLoad` 启动 Mac 网关；异常退出由 launchd 恢复，不等待 VM 就绪 |
+| `local.workbuddy.qq-agent-gateway.qq-runtime` | 登录时运行，之后每 60 秒检查既有 VM 与容器；只恢复、不重建 |
 
 plist 必须实际保留在当前用户的 `~/Library/LaunchAgents/`。项目 `config/` 中的生成文件或当前正在运行的进程，都不能替代系统目录里的安装文件。2026-10-07 的一次启动失败正是两个已安装 plist 缺失；重新安装和加载后，面板及 QQ 登录状态恢复。无法仅凭文件缺失判断是谁删除了它们。
 
@@ -192,8 +192,8 @@ plist 必须实际保留在当前用户的 `~/Library/LaunchAgents/`。项目 `c
 以下为只读检查，不调用模型，也不发送 QQ 消息：
 
 ```bash
-launchctl print "gui/$(id -u)/local.codexremotecontact.chat-hub"
-launchctl print "gui/$(id -u)/local.codexremotecontact.qq-runtime"
+launchctl print "gui/$(id -u)/local.workbuddy.qq-agent-gateway.chat-hub"
+launchctl print "gui/$(id -u)/local.workbuddy.qq-agent-gateway.qq-runtime"
 colima status --profile snowluma
 docker --context colima-snowluma ps --format '{{.Names}} {{.Status}}'
 curl --noproxy '*' -fsS --max-time 5 \

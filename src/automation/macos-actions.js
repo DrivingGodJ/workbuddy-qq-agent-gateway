@@ -20,7 +20,7 @@ export class MacActionClient {
       ...action,
       sourceGroupId: String(sourceGroupId || ""),
       sourceGroupName: String(sourceGroupName || "学校通知群"),
-      marker: `[CodexRemoteContact:${action.actionId}]`
+      marker: `[WorkBuddyQQ:${action.actionId}]`
     };
     const args = action.type === "reminder"
       ? reminderArguments(this.reminderScript, payload)

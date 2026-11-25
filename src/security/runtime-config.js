@@ -17,7 +17,7 @@ export function resolvePersonaFiles(projectDir, configuredDir = "") {
       throw new Error("examples.json requires an examples array");
     }
   } catch {
-    throw new Error("Personality configuration is missing or invalid; check CODEX_REMOTE_CONTACT_PERSONA_DIR/core.json and examples.json");
+    throw new Error("Personality configuration is missing or invalid; check WORKBUDDY_QQ_PERSONA_DIR/core.json and examples.json");
   }
   return { corePath, examplesPath };
 }

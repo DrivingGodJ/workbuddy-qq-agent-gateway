@@ -65,7 +65,7 @@ test("AI rejection is deferred until commit, persists over restart and skips fut
   f.faces.push({ emoji_id: "blocked-native", md5: candidate.md5 });
   let purged = false;
   const labeler = new EphemeralStickerLabeler({ stickerManager: f.manager, workspaceRoot: join(f.root, "jobs"),
-    codex: { async startThread() { return "temporary-label"; }, async runTurn() { return { text: "拉黑：无意义的空白占位图" }; },
+    agent: { async startThread() { return "temporary-label"; }, async runTurn() { return { text: "拉黑：无意义的空白占位图" }; },
       async deleteThread() { purged = true; } } });
   await labeler.init();
   const result = await labeler.labelMessages([message], { deferCommit: true });

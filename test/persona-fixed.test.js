@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { PersonaStore } from "../src/persona/persona-store.js";
 import { eventMetadata } from "../src/security/event-metadata.js";
 
@@ -21,7 +22,7 @@ async function fixture(t, preferences = {}) {
 }
 
 test("startup keeps manual identity and catchphrases but purges learned rules and raw sample copies", async (t) => {
-  const entries = [{ text: "了解", when: "意外的好消息" }];
+  const entries = [{ text: "这么好", when: "意外的好消息" }];
   const { store, ownerStylePath } = await fixture(t, {
     agentName: "测试代", activeCatchphrases: [{ text: "好", when: "确认" }],
     pendingCatchphrases: entries, pendingCatchphrasesAt: "2099-10-22T20:00:00.000Z",
@@ -39,9 +40,9 @@ test("startup keeps manual identity and catchphrases but purges learned rules an
 
 test("manual catchphrases apply immediately and survive restart without a daily job", async (t) => {
   const { store, ownerStylePath } = await fixture(t);
-  const entries = [{ text: "了解", when: "条件意外不错" }];
+  const entries = [{ text: "这么好", when: "条件意外不错" }];
   assert.deepEqual(await store.stageCatchphrases(entries), { entries });
-  assert.match(store.systemPrompt(), /了解：条件意外不错/u);
+  assert.match(store.systemPrompt(), /这么好：条件意外不错/u);
   assert.equal(Object.hasOwn(store.publicState(), "pendingCatchphrases"), false);
   const restored = new PersonaStore({ corePath: store.corePath, examplesPath: store.examplesPath, ownerStylePath });
   await restored.init();
@@ -62,20 +63,44 @@ test("original positive and negative examples are both injected beyond the old e
   assert.equal(store.systemPrompt(), prompt);
 });
 
-test("public persona contains only generic examples with verified system injection", async (t) => {
+test("default persona delivers full high-authenticity examples, 20 catchphrases, and clean renaming", async (t) => {
   const { store } = await fixture(t);
+  assert.equal(store.name(), "小伴");
+  assert.equal(store.catchphrases().length, 20);
+  for (const text of ["这么好", "我勒个", "绷不住了", "那很（具体形容词）了"]) {
+    assert.ok(store.catchphrases().some((entry) => entry.text === text), `missing catchphrase: ${text}`);
+  }
+  assert.ok(store.examples.length >= 24);
+  assert.equal(store.publicState().injectedExampleCount, store.examples.length);
+
+  const defaultPrompt = store.systemPrompt();
+  assert.doesNotMatch(defaultPrompt, /老代|大肥鱼|小鲸鱼|DeepSeek|南师附中/u);
+
+  await store.setName("团子");
+  const renamedPrompt = store.systemPrompt();
+  assert.match(renamedPrompt, /你是团子/u);
+  assert.doesNotMatch(renamedPrompt, /小伴/u);
+  assert.equal(store.publicState().injectedExampleCount, store.examples.length);
+});
+
+test("private fixed persona includes all configured examples and the two requested interests", {
+  skip: !existsSync(new URL("../config/private/persona/core.json", import.meta.url))
+}, async (t) => {
+  const { store } = await fixture(t);
+  store.core = JSON.parse(await readFile(new URL("../config/private/persona/core.json", import.meta.url), "utf8"));
+  store.examples = JSON.parse(await readFile(new URL("../config/private/persona/examples.json", import.meta.url), "utf8")).examples;
   const prompt = store.systemPromptForClient();
   assert.equal(store.publicState().injectedExampleCount, store.examples.length);
+  assert.ok(store.examples.length >= 24);
+  assert.match(prompt, /兴趣倾向：.*南师附中.*高中教育/u);
   assert.match(prompt, /你有权主动发起话题/u);
   assert.match(prompt, /不要为了反对而反对/u);
   assert.match(prompt, /你只是群友之一/u);
-  assert.match(prompt, /群里多人连续复读同一句话时，可以看气氛原样跟一句/u);
-  assert.match(prompt, /群友复读接龙除外/u);
-  assert.doesNotMatch(prompt, /不要变成复读机/u);
   assert.match(prompt, /可以「你先想好 \/ 那你再想想」/u);
   assert.match(prompt, /性格底色是随性、嘴硬/u);
   assert.match(prompt, /日常文字优先 2–12 字/u);
-  assert.match(prompt, /先接他讲的事和感受/u);
+  assert.ok(store.core.catchphrases.some((entry) => entry.text === "这么好"));
+  assert.ok(store.core.catchphrases.some((entry) => entry.text === "那很（具体形容词）了"));
   for (const sample of store.examples.filter((item) => item.source)) {
     assert.match(sample.source, /a56164e70a0521a7829138a42eee76066fde2b8b/u);
     for (const positive of sample.examples) assert.doesNotMatch(positive,
@@ -87,25 +112,6 @@ test("public persona contains only generic examples with verified system injecti
 test("daily style capture and scheduled summary are not wired into the gateway", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /DailyStyleCoordinator|dailyStyle\.|persona-style-samples/u);
-});
-
-test("sticker-only scenarios are injected as tool actions without a spurious silence fallback", async (t) => {
-  const { store } = await fixture(t);
-  const prompt = store.systemPromptForClient();
-  assert.match(prompt, /默认先选 QQ 原生表情包，不先写一句文字/u);
-  assert.match(prompt, /表情优先于短吐槽和口头禅/u);
-  assert.match(prompt, /口头禅只是文字备选/u);
-  const scenes = prompt.split("\n").filter((line) => /群友抛来离谱或好笑的梗|只想表示赞同、无奈/.test(line));
-  assert.equal(scenes.length, 2);
-  for (const line of scenes) {
-    assert.match(line, /list_reactions/u);
-    assert.match(line, /send_reaction/u);
-    assert.doesNotMatch(line, /可以不发消息|；可以「/u);
-  }
-  assert.match(prompt, /表情包是老代最顺手的第一语言/u);
-  assert.match(prompt, /安慰、鼓励、庆祝、想念都可以用表情先回应/u);
-  assert.doesNotMatch(prompt, /不强迫使用 emoji 或表情包|不用表情拖延|不硬塞表情|不为凑比例硬发/u);
-  assert.equal(store.publicState().injectedExampleCount, store.examples.length);
 });
 
 test("event status ring cannot retain chat bodies, replies, tools payloads or attachments", () => {

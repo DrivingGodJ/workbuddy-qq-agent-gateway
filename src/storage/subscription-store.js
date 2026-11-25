@@ -482,6 +482,91 @@ export class SubscriptionStore {
     return removed;
   }
 
+  async pruneExpiredSourceMessages({ maxPerSource = 120, maxAgeMs = 72 * 60 * 60 * 1000 } = {}) {
+    const now = this.clock().getTime();
+    const ageLimit = Math.max(60_000, Number(maxAgeMs) || 72 * 60 * 60 * 1000);
+    const cutoff = now - ageLimit;
+    const activeProtectCutoff = now - Math.min(ageLimit, 24 * 60 * 60 * 1000);
+    const maxItems = Math.max(10, Math.floor(Number(maxPerSource) || 120));
+    const removedMessages = [];
+    let changed = false;
+
+    for (const source of Object.values(this.state.sources)) {
+      const subs = Object.values(this.state.subscriptions).filter((sub) => sub.sourceGroupId === source.groupId);
+      const protectedSequences = new Set();
+      for (const sub of subs) {
+        if (sub.state.processingUntilSequence != null) {
+          for (const seq of sub.state.pendingSequences) protectedSequences.add(Number(seq));
+        }
+        if (sub.enabled) {
+          for (const seq of sub.state.pendingSequences) {
+            const msg = source.messages.find((item) => Number(item.sequence) === Number(seq));
+            const ts = Date.parse(msg?.receivedAt || msg?.timestamp || "");
+            if (!Number.isFinite(ts) || ts >= activeProtectCutoff) {
+              protectedSequences.add(Number(seq));
+            }
+          }
+        }
+      }
+
+      const fresh = [];
+      for (const message of source.messages) {
+        const ts = Date.parse(message?.receivedAt || message?.timestamp || "");
+        const expired = Number.isFinite(ts) && ts < cutoff;
+        if (expired && !protectedSequences.has(Number(message.sequence))) {
+          removedMessages.push(message);
+          changed = true;
+        } else {
+          fresh.push(message);
+        }
+      }
+
+      if (fresh.length > maxItems) {
+        let toDrop = fresh.length - maxItems;
+        const retained = [];
+        for (const message of fresh) {
+          if (toDrop > 0 && !protectedSequences.has(Number(message.sequence))) {
+            removedMessages.push(message);
+            toDrop -= 1;
+            changed = true;
+          } else {
+            retained.push(message);
+          }
+        }
+        source.messages = retained;
+      } else if (fresh.length !== source.messages.length) {
+        source.messages = fresh;
+      }
+
+      const remainingSeqs = new Set(source.messages.map((message) => Number(message.sequence)));
+      for (const sub of subs) {
+        const nextPending = sub.state.pendingSequences.filter((seq) => remainingSeqs.has(Number(seq)));
+        if (nextPending.length !== sub.state.pendingSequences.length) {
+          sub.state.pendingSequences = nextPending;
+          changed = true;
+        }
+      }
+
+      const nextRecent = source.recentMessages.filter((message) => {
+        const ts = Date.parse(message?.receivedAt || message?.timestamp || "");
+        return !Number.isFinite(ts) || ts >= cutoff;
+      }).slice(-10);
+      if (nextRecent.length !== source.recentMessages.length) {
+        source.recentMessages = nextRecent;
+        changed = true;
+      }
+
+      const gcRemoved = this.garbageCollectSource(source.groupId);
+      if (gcRemoved.length > 0) {
+        removedMessages.push(...gcRemoved);
+        changed = true;
+      }
+    }
+
+    if (changed) await this.save();
+    return { removedMessages };
+  }
+
   async save() {
     this.state.updatedAt = this.clock().toISOString();
     const body = JSON.stringify(this.state, null, 2);

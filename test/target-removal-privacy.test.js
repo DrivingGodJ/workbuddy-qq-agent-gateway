@@ -11,7 +11,7 @@ test("removing an idle target archives only metadata and returns its media for c
     const pending = { groupId: "100000001", messageId: "1", text: "SECRET_PENDING" };
     const source = { groupId: "100000003", messageId: "2", text: "SECRET_SOURCE" };
     const conversation = {
-      groupId: "100000001", threadId: "persistent-thread", codexConfig: { model: "test" }, replyEnabled: true,
+      groupId: "100000001", threadId: "persistent-thread", agentConfig: { model: "test" }, replyEnabled: true,
       pendingMessages: [pending], recentTurns: [{ text: "SECRET_HISTORY" }], sentMessages: [{ summary: "SECRET_SENT" }],
       liveSession: { lastReply: "SECRET_LIVE" }, lastReply: "SECRET_REPLY", lastCompletedReply: { text: "SECRET_COMPLETE" },
       failedDelivery: { text: "SECRET_DELIVERY" }, lastError: "SECRET_ERROR"
@@ -41,7 +41,7 @@ test("removing an idle target archives only metadata and returns its media for c
     assert.doesNotMatch(raw, /SECRET_/u);
     assert.equal(archive.version, 2);
     assert.deepEqual(archive.conversation, {
-      groupId: conversation.groupId, replyEnabled: true, codexConfig: { model: "test" }, threadId: "persistent-thread"
+      groupId: conversation.groupId, replyEnabled: true, agentConfig: { model: "test" }, threadId: "persistent-thread"
     });
     assert.equal(archive.subscriptions[0].sourceGroupId, "100000003");
     assert.equal(archive.qzoneBinding.autoPostEnabled, true);

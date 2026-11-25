@@ -6,7 +6,7 @@ import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { promisify } from "node:util";
 
 const defaultExecFile = promisify(execFileCallback);
-const DEFAULT_STAGING_ROOT = "/tmp/codexremotecontact-qq-files";
+const DEFAULT_STAGING_ROOT = "/tmp/workbuddy-qq-files";
 const IMAGE_MIME_TYPES = Object.freeze({
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -156,7 +156,7 @@ export class QqFileManager {
     if (Number(image?.size || 0) <= this.maxImageBytes && !image?.needsOptimization) {
       return callback(image);
     }
-    const tempDir = await mkdtemp(join(tmpdir(), "codexremotecontact-qq-image-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "workbuddy-qq-image-"));
     try {
       const prepared = await this.optimizeImage(image, tempDir);
       return await callback(prepared);
@@ -253,12 +253,27 @@ export class QqFileManager {
   async dockerExec(...command) {
     return this.execDocker("exec", "-u", "0", this.container, ...command);
   }
+
+  async cleanupStaleStaging({ aggressive = false } = {}) {
+    const minAgeMinutes = aggressive ? 5 : 60;
+    const escapedRoot = this.stagingRoot.replace(/'/g, "'\\''");
+    const script = [
+      "rm -f /app/core /app/core.* /app/.config/QQ/crash_files/* 2>/dev/null || true",
+      `[ -d '${escapedRoot}' ] && find '${escapedRoot}' -mindepth 1 -maxdepth 2 -mmin +${minAgeMinutes} -exec rm -rf -- {} + 2>/dev/null || true`
+    ].join("; ");
+    try {
+      await this.dockerExec("sh", "-c", script);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, skipped: true, reason: String(error?.message || error) };
+    }
+  }
 }
 
 function validateStagingRoot(value) {
   const path = String(value || DEFAULT_STAGING_ROOT).trim();
   if (path !== DEFAULT_STAGING_ROOT && !path.startsWith(`${DEFAULT_STAGING_ROOT}/`)) {
-    throw new Error("QQ file staging root must stay under /tmp/codexremotecontact-qq-files");
+    throw new Error("QQ file staging root must stay under /tmp/workbuddy-qq-files");
   }
   return path.replace(/\/+$/, "") || DEFAULT_STAGING_ROOT;
 }

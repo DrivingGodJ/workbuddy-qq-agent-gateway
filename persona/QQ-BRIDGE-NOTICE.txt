@@ -1,15 +1,13 @@
 Persona adaptation attribution
 
-The public gateway persona adapts the social-character writing approach and
+The private Laodai persona adapts the social-character writing approach and
 selected behavior guidance from roles/小鲸鱼.md and the qq-chat-v2 preset in
 https://github.com/Derpyu520/qq-bridge
 commit a56164e70a0521a7829138a42eee76066fde2b8b.
 Character name, identity, catchphrases, tools and permissions are not inherited.
-Only generic examples are distributed. Private questionnaires, preferences,
-catchphrases, interests and chat records are not included in this repository.
-Earlier versions included selected generic dialogue excerpts. Version 10
-rewrites the scenarios while retaining the influence of the general chat
-approach and this attribution for the adapted persona material.
+The existing Laodai example dialogues and OWNER catchphrases are retained.
+General original behavior descriptions and selected generic dialogue excerpts
+are included; sourced dialogues carry provenance in the example configuration.
 This notice applies only to the adapted persona material, not the whole gateway.
 
 MIT License

@@ -1,15 +1,14 @@
 import { createServer } from "node:http";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { extname, join, normalize, resolve } from "node:path";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MacActionClient } from "./automation/macos-actions.js";
 import { HomeAssistantClient } from "./automation/home-assistant.js";
-import { CodexClient } from "./codex/client.js";
 import { WorkBuddyClient } from "./workbuddy/client.js";
 import { PersonaStore } from "./persona/persona-store.js";
-import { ThreadReservationManager } from "./codex/thread-reservations.js";
+import { ThreadReservationManager } from "./storage/thread-reservations.js";
 import { GroupWorker } from "./groups/group-worker.js";
 import { GroupMemberDirectory } from "./qq/group-member-directory.js";
 import { toPublicGroupState } from "./groups/group-state.js";
@@ -34,20 +33,27 @@ import { OneBotClient } from "./qq/onebot-client.js";
 import { PrivateWorker } from "./qq/private-worker.js";
 import { AGENT_QQ_ID, OWNER_QQ_ID, parseOwnerControlCommand } from "./security/policy.js";
 import { SessionStore } from "./storage/session-store.js";
+import { MetadataCache } from "./storage/metadata-cache.js";
 import { AgentDispatchStore } from "./storage/agent-dispatch-store.js";
 import { eventMetadata } from "./security/event-metadata.js";
 import { StickerLabelSettingsStore } from "./storage/sticker-label-settings-store.js";
 import { QzoneStore } from "./qq/qzone-store.js";
+import { LanControlServer } from "./network/lan-control-server.js";
 import { SubscriptionStore } from "./storage/subscription-store.js";
 import { TargetAllowlistSettings } from "./storage/target-allowlist-settings.js";
+import { StorageHygieneManager } from "./storage/storage-hygiene.js";
 import { resolvePersonaFiles, validateRuntimeConfig } from "./security/runtime-config.js";
 
 const sourceDir = fileURLToPath(new URL(".", import.meta.url));
 const projectDir = resolve(sourceDir, "..");
+const packageVersion = await readPackageVersion(join(projectDir, "package.json"));
 const publicDir = join(projectDir, "modules", "web-console", "public");
-const runtimeDir = process.env.CODEX_REMOTE_CONTACT_RUNTIME_DIR || join(projectDir, "runtime");
-const dataDir = process.env.CODEX_REMOTE_CONTACT_DATA_DIR || join(runtimeDir, "qq-only-data");
-const sharedDataDir = process.env.CODEX_REMOTE_CONTACT_SHARED_DATA_DIR || join(projectDir, "data");
+const runtimeDir = process.env.WORKBUDDY_QQ_RUNTIME_DIR || join(projectDir, "runtime");
+const dataDir = process.env.WORKBUDDY_QQ_DATA_DIR || join(runtimeDir, "qq-only-data");
+const sharedDataDir = process.env.WORKBUDDY_QQ_SHARED_DATA_DIR || join(projectDir, "data");
+const defaultAgentCwd = process.env.WORKBUDDY_QQ_WORKSPACE_DIR
+  || (process.env.WORKBUDDY_QQ_RUNTIME_DIR ? join(runtimeDir, "workspace") : projectDir);
+if (defaultAgentCwd !== projectDir) await mkdir(defaultAgentCwd, { recursive: true });
 const settingsPath = join(dataDir, "settings.json");
 const sessionStorePath = join(dataDir, "group-sessions.json");
 const privateSessionStorePath = join(dataDir, "private-sessions.json");
@@ -59,74 +65,51 @@ const stickerCurationPath = join(dataDir, "sticker-curation.json");
 const qzoneStorePath = join(dataDir, "qzone.json");
 const personaOwnerStylePath = join(dataDir, "persona-owner-style.json");
 const { corePath: personaCorePath, examplesPath: personaExamplesPath } = resolvePersonaFiles(
-  projectDir, process.env.CODEX_REMOTE_CONTACT_PERSONA_DIR
+  projectDir, process.env.WORKBUDDY_QQ_PERSONA_DIR
 );
 const legacyContextPath = join(sharedDataDir, "qq-owner-agent-context.json");
 const mediaRoot = join(runtimeDir, "qq-media");
 const stickerLibraryDir = join(runtimeDir, "qq-stickers");
 const stickerLabelWorkspaceRoot = join(runtimeDir, "sticker-label-jobs");
 const stickerCurationWorkspaceRoot = join(runtimeDir, "sticker-curation-jobs");
-const groupWorkspaceRoot = process.env.CODEX_REMOTE_CONTACT_GROUP_WORKSPACE_ROOT || join(runtimeDir, "group-workspaces");
+const groupWorkspaceRoot = process.env.WORKBUDDY_QQ_GROUP_WORKSPACE_ROOT || join(runtimeDir, "group-workspaces");
+const privateWorkspaceRoot = process.env.WORKBUDDY_QQ_PRIVATE_WORKSPACE_ROOT || join(runtimeDir, "private-workspaces");
 
-const hubHost = process.env.CODEX_REMOTE_CONTACT_HOST || "127.0.0.1";
-const hubPort = Number(process.env.CODEX_REMOTE_CONTACT_PORT || 3789);
-const bodyLimit = Math.max(64 * 1024, Number(process.env.CODEX_REMOTE_CONTACT_BODY_LIMIT_BYTES || 4 * 1024 * 1024));
-const authDisabled = process.env.CODEX_REMOTE_CONTACT_DISABLE_AUTH === "1";
-const configuredApiToken = String(process.env.CODEX_REMOTE_CONTACT_API_TOKEN || "").trim();
+const hubHost = process.env.WORKBUDDY_QQ_HOST || "127.0.0.1";
+const hubPort = Number(process.env.WORKBUDDY_QQ_PORT || 3789);
+const bodyLimit = Math.max(64 * 1024, Number(process.env.WORKBUDDY_QQ_BODY_LIMIT_BYTES || 4 * 1024 * 1024));
+const authDisabled = process.env.WORKBUDDY_QQ_DISABLE_AUTH === "1";
+const configuredApiToken = String(process.env.WORKBUDDY_QQ_API_TOKEN || "").trim();
 const apiToken = authDisabled ? "" : configuredApiToken;
 const oneBotAccessToken = String(process.env.ONEBOT_ACCESS_TOKEN || "").trim();
-const oneBotCallbackToken = configuredApiToken || oneBotAccessToken;
+const oneBotCallbackTokens = uniqueStrings([oneBotAccessToken, configuredApiToken]);
 const oneBotBaseUrl = process.env.ONEBOT_API_BASE || "http://127.0.0.1:3000";
 validateRuntimeConfig({ ownerId: OWNER_QQ_ID, botId: AGENT_QQ_ID, host: hubHost,
   authDisabled, apiToken, oneBotToken: oneBotAccessToken });
-const codexExecutable = process.env.CODEX_CLI_PATH || [
-  "/Applications/ChatGPT.app/Contents/Resources/codex",
-  "/Applications/Codex.app/Contents/Resources/codex"
-].find((candidate) => existsSync(candidate)) || "codex";
 
 const settings = await loadSettings(settingsPath);
 const targetAllowlist = new TargetAllowlistSettings({ filePath: settingsPath, settings });
 const allowedGroups = targetAllowlist.list("group");
 
-// 引擎选择：默认换成 WorkBuddy，可用 CODEX_REMOTE_CONTACT_ENGINE=codex 回退。
-// 传输层（QQ 队列 / 订阅 / 投递确认 / UI 状态）两者共用，接口同构。
-const engineKind = String(process.env.CODEX_REMOTE_CONTACT_ENGINE || "workbuddy").toLowerCase() === "codex"
-  ? "codex"
-  : "workbuddy";
-const WORKBUDDY_DEFAULT_MODEL = process.env.CODEX_REMOTE_CONTACT_WB_MODEL || "auto";
-const looksLikeCodexModelName = (name) => /^(gpt-|o[0-9])/i.test(String(name || ""));
-const configuredModel = process.env.CODEX_REMOTE_CONTACT_CODEX_MODEL || settings.ai?.model || null;
-// 换引擎就换了模型命名空间：settings 里存的 gpt-* 在 WorkBuddy 上不存在，
-// 这种情况下退回 WorkBuddy 的默认模型（null 表示交给 CLI 自己选）。
-const codexModel = engineKind === "workbuddy"
-  ? (configuredModel && !looksLikeCodexModelName(configuredModel) ? configuredModel : WORKBUDDY_DEFAULT_MODEL)
-  : (configuredModel || "gpt-5.6-luna");
-const codexEffort = process.env.CODEX_REMOTE_CONTACT_REASONING_EFFORT || settings.ai?.reasoningEffort || "low";
-const configuredAutoCompactTokenLimit = Number(process.env.CODEX_REMOTE_CONTACT_AUTO_COMPACT_TOKEN_LIMIT || settings.ai?.autoCompactTokenLimit || 0);
-const codexAutoCompactTokenLimit = Number.isFinite(configuredAutoCompactTokenLimit) && configuredAutoCompactTokenLimit > 0
+const defaultModel = process.env.WORKBUDDY_QQ_WB_MODEL || settings.ai?.model || "auto";
+const defaultEffort = process.env.WORKBUDDY_QQ_REASONING_EFFORT || settings.ai?.reasoningEffort || "low";
+const configuredAutoCompactTokenLimit = Number(process.env.WORKBUDDY_QQ_AUTO_COMPACT_TOKEN_LIMIT || settings.ai?.autoCompactTokenLimit || 0);
+const autoCompactTokenLimit = Number.isFinite(configuredAutoCompactTokenLimit) && configuredAutoCompactTokenLimit > 0
   ? Math.max(10_000, Math.floor(configuredAutoCompactTokenLimit))
   : null;
-const configuredAutoCompactScope = String(process.env.CODEX_REMOTE_CONTACT_AUTO_COMPACT_TOKEN_SCOPE || settings.ai?.autoCompactTokenScope || "total");
-const codexAutoCompactTokenScope = ["total", "body_after_prefix"].includes(configuredAutoCompactScope)
+const configuredAutoCompactScope = String(process.env.WORKBUDDY_QQ_AUTO_COMPACT_TOKEN_SCOPE || settings.ai?.autoCompactTokenScope || "total");
+const autoCompactTokenScope = ["total", "body_after_prefix"].includes(configuredAutoCompactScope)
   ? configuredAutoCompactScope
   : "total";
-const contextTokenOptions = engineKind === "workbuddy"
-  ? [
-      { value: "auto", label: "自动 · 跟随模型", description: "由 WorkBuddy 按当前模型的上下文窗口自动压缩" },
-      { value: 100_000, label: "最短 · 100K", description: "WorkBuddy CLI 允许的最小压缩阈值" },
-      { value: 200_000, label: "轻量 · 200K", description: "较早压缩，适合日常对话" },
-      { value: 400_000, label: "平衡 · 400K", description: "保留较多近期细节" },
-      { value: 600_000, label: "较长 · 600K", description: "较长任务使用，单轮处理可能更慢" },
-      { value: 800_000, label: "长 · 800K", description: "长任务使用，可能增加耗时与用量" },
-      { value: 1_000_000, label: "最长 · 1M", description: "WorkBuddy CLI 允许的最大压缩阈值" }
-    ]
-  : [
-      { value: 32_000, label: "省量 · 32K", description: "更早压缩；压缩后的新增上下文按 32K 计量，不是总输入硬上限" },
-      { value: 64_000, label: "轻量 · 64K", description: "适合通知和日常对话；压缩后的新增上下文按 64K 计量" },
-      { value: 100_000, label: "精简 · 100K", description: "更早压缩，适合日常短对话" },
-      { value: 200_000, label: "平衡 · 200K", description: "保留更多近期细节，当前默认" },
-      { value: 400_000, label: "充足 · 400K", description: "更长历史，单轮处理可能更慢" }
-    ];
+const contextTokenOptions = [
+  { value: "auto", label: "自动 · 跟随模型", description: "由 WorkBuddy 按当前模型的上下文窗口自动压缩" },
+  { value: 100_000, label: "最短 · 100K", description: "WorkBuddy CLI 允许的最小压缩阈值" },
+  { value: 200_000, label: "轻量 · 200K", description: "较早压缩，适合日常对话" },
+  { value: 400_000, label: "平衡 · 400K", description: "保留较多近期细节" },
+  { value: 600_000, label: "较长 · 600K", description: "较长任务使用，单轮处理可能更慢" },
+  { value: 800_000, label: "长 · 800K", description: "长任务使用，可能增加耗时与用量" },
+  { value: 1_000_000, label: "最长 · 1M", description: "WorkBuddy CLI 允许的最大压缩阈值" }
+];
 const permissionModeOptions = [
   { value: "readOnly", label: "只读分析", description: "可读取和分析，不修改文件或外部状态", targetTypes: ["group", "private"] },
   { value: "workspaceWrite", label: "工作区写入", description: "可在当前目标工作区内创建、修改和运行文件", targetTypes: ["group", "private"] },
@@ -137,30 +120,26 @@ const homeAssistantPermissionOptions = [
   { value: "owner", label: "仅 OWNER（你本人）", description: "只接受你本人在当前会话发出的家居和音箱请求；其他成员不能授权", targetTypes: ["group", "private"] },
   { value: "group", label: "全群成员", description: "本群成员都可请求读取、控制已开放的家居设备或让小爱音箱说话；不开放 HA 账号和系统设置", targetTypes: ["group"] }
 ];
-const defaultCodexConfig = {
-  model: codexModel,
-  reasoningEffort: codexEffort,
-  contextTokenLimit: engineKind === "workbuddy"
-    ? normalizeWorkBuddyContextLimit(codexAutoCompactTokenLimit || 200_000)
-    : (codexAutoCompactTokenLimit || 200_000),
+const defaultAgentConfig = {
+  model: defaultModel,
+  reasoningEffort: defaultEffort,
+  contextTokenLimit: normalizeWorkBuddyContextLimit(autoCompactTokenLimit || 200_000),
   workingMode: "agent",
   permissionMode: "workspaceWrite",
   calendarRemindersEnabled: false,
   homeAssistantPermission: "owner",
+  groupEssenceEnabled: false,
+  groupMuteEnabled: false,
   speakerGreetings: []
 };
-const codexExecutableArgs = codexAutoCompactTokenLimit == null ? [] : [
-  "-c", `model_auto_compact_token_limit=${codexAutoCompactTokenLimit}`,
-  "-c", `model_auto_compact_token_limit_scope=${JSON.stringify(codexAutoCompactTokenScope)}`
-];
 const periodicTriggerMinutes = Math.max(1, Number(settings.qq?.triggerPolicy?.periodicMinutes || 10));
-const qzoneScheduleTimes = String(process.env.CODEX_REMOTE_CONTACT_QZONE_POST_SCHEDULE || process.env.CODEX_REMOTE_CONTACT_QQ_SCHEDULE
+const qzoneScheduleTimes = String(process.env.WORKBUDDY_QQ_QZONE_POST_SCHEDULE || process.env.WORKBUDDY_QQ_SCHEDULE
   || (settings.qq?.qzonePostSchedule || settings.qq?.triggerPolicy?.schedule || ["08:00", "12:00", "18:00"]).join(","))
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
 
-const store = new SessionStore({ filePath: sessionStorePath, defaultCodexConfig });
+const store = new SessionStore({ filePath: sessionStorePath, defaultAgentConfig });
 await store.init({ allowedGroups, legacyContextPath });
 const subscriptionStore = new SubscriptionStore({ filePath: subscriptionStorePath });
 await subscriptionStore.init();
@@ -201,63 +180,102 @@ for (const groupId of subscriptionStore.sourceGroupIds()) {
 
 const configuredPrivateIds = uniqueStrings([OWNER_QQ_ID, ...targetAllowlist.list("private"), ...subscriptionStore.privateTargetIds()])
   .filter((id) => !targetAllowlist.isRemoved("private", id));
-const privateStore = new SessionStore({ filePath: privateSessionStorePath, defaultCodexConfig });
+const privateStore = new SessionStore({ filePath: privateSessionStorePath, defaultAgentConfig });
 await privateStore.init({ allowedGroups: configuredPrivateIds });
 for (const id of targetAllowlist.removed("private")) await privateStore.removeConversation(id);
 const personaStore = new PersonaStore({
   corePath: personaCorePath,
   examplesPath: personaExamplesPath,
-  ownerStylePath: personaOwnerStylePath
+  ownerStylePath: personaOwnerStylePath,
+  importedDir: join(dataDir, "persona")
 });
 await personaStore.init();
-if (engineKind === "workbuddy") {
-  await migrateWorkBuddyConversationConfigs(store);
-  await migrateWorkBuddyConversationConfigs(privateStore);
-}
+await migrateWorkBuddyConversationConfigs(store);
+await migrateWorkBuddyConversationConfigs(privateStore);
 
 const oneBot = new OneBotClient({
   baseUrl: oneBotBaseUrl, accessToken: oneBotAccessToken, readOnlyGroupIds: subscriptionStore.sourceGroupIds(),
-  fileUploadTimeoutMs: Number(process.env.CODEX_REMOTE_CONTACT_QQ_FILE_UPLOAD_TIMEOUT_MS || settings.qq?.files?.uploadTimeoutMs || 6 * 60 * 60 * 1000),
+  fileUploadTimeoutMs: Number(process.env.WORKBUDDY_QQ_FILE_UPLOAD_TIMEOUT_MS || settings.qq?.files?.uploadTimeoutMs || 6 * 60 * 60 * 1000),
   canReply: (type, id) => {
     assertTarget(type, id);
     (type === "private" ? privateStore : store).assertReplyEnabled(id);
     return true;
   }
 });
-const groupMetadata = Object.fromEntries(allowedGroups.map((groupId) => [groupId, { groupId, groupName: null }]));
-const availableGroupMetadata = {};
-const privateMetadata = Object.fromEntries(privateStore.listGroups().map((item) => [item.groupId, { displayName: item.groupId === OWNER_QQ_ID ? "OWNER" : null }]));
+const metadataCache = new MetadataCache({ filePath: join(dataDir, "qq-metadata-cache.json") });
+await metadataCache.init();
+const cachedMetadata = metadataCache.snapshot();
+const groupMetadata = Object.fromEntries(allowedGroups.map((groupId) => {
+  const cached = cachedMetadata.groups[groupId] || {};
+  return [groupId, {
+    groupId,
+    groupName: cached.groupName || null,
+    botRole: cached.botRole || null
+  }];
+}));
+const availableGroupMetadata = Object.fromEntries(
+  Object.entries(cachedMetadata.groups || {}).map(([groupId, cached]) => [groupId, {
+    groupId,
+    groupName: cached.groupName || null,
+    botRole: cached.botRole || null
+  }])
+);
+const privateMetadata = Object.fromEntries(privateStore.listGroups().map((item) => {
+  const cached = cachedMetadata.privateChats[item.groupId] || {};
+  return [item.groupId, {
+    displayName: cached.displayName || (item.groupId === OWNER_QQ_ID ? "OWNER" : null)
+  }];
+}));
 const mentionNameCache = new Map();
 const fileManager = new QqFileManager({
   oneBot,
-  dockerPath: process.env.CODEX_REMOTE_CONTACT_DOCKER_PATH || "/opt/homebrew/bin/docker",
-  dockerContext: process.env.CODEX_REMOTE_CONTACT_DOCKER_CONTEXT || "colima-snowluma",
-  container: process.env.CODEX_REMOTE_CONTACT_SNOWLUMA_CONTAINER || "snowluma",
-  stagingRoot: process.env.CODEX_REMOTE_CONTACT_QQ_FILE_STAGING_ROOT || "/tmp/codexremotecontact-qq-files",
-  maxFileBytes: Number(process.env.CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES || settings.qq?.files?.maxFileBytes || 1024 * 1024 * 1024),
-  maxImageBytes: Number(process.env.CODEX_REMOTE_CONTACT_QQ_IMAGE_SEND_MAX_BYTES || settings.qq?.files?.maxImageBytes || 20 * 1024 * 1024)
+  dockerPath: process.env.WORKBUDDY_QQ_DOCKER_PATH || "/opt/homebrew/bin/docker",
+  dockerContext: process.env.WORKBUDDY_QQ_DOCKER_CONTEXT || "colima-snowluma",
+  container: process.env.WORKBUDDY_QQ_SNOWLUMA_CONTAINER || "snowluma",
+  stagingRoot: process.env.WORKBUDDY_QQ_FILE_STAGING_ROOT || "/tmp/workbuddy-qq-files",
+  maxFileBytes: Number(process.env.WORKBUDDY_QQ_FILE_MAX_BYTES || settings.qq?.files?.maxFileBytes || 1024 * 1024 * 1024),
+  maxImageBytes: Number(process.env.WORKBUDDY_QQ_IMAGE_SEND_MAX_BYTES || settings.qq?.files?.maxImageBytes || 20 * 1024 * 1024)
 });
 // QQ may still be booting. Staging cleanup must not prevent the panel from
 // starting; retry later and share the same initialization with outbound jobs.
 const initializeFileStaging = () => fileManager.init().catch((error) => {
   console.warn(`QQ file staging initialization deferred: ${error.message}`);
 });
-await initializeFileStaging();
+void initializeFileStaging();
 const fileStagingInitTimer = setInterval(initializeFileStaging, 60_000);
 fileStagingInitTimer.unref();
+const defaultMediaTtlMs = settings.qq?.media?.orphanTtlDays != null
+  ? Number(settings.qq.media.orphanTtlDays) * 24 * 60 * 60 * 1000
+  : Number(process.env.WORKBUDDY_QQ_MEDIA_TTL_HOURS || 24) * 60 * 60 * 1000;
 const mediaManager = new QqMediaManager({
   rootDir: mediaRoot,
-  maxImageBytes: Number(process.env.CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES || settings.qq?.media?.maxImageBytes || 20 * 1024 * 1024),
-  maxAttachmentBytes: Number(process.env.CODEX_REMOTE_CONTACT_QQ_ATTACHMENT_MAX_BYTES || settings.qq?.media?.maxAttachmentBytes || 1024 * 1024 * 1024),
-  orphanTtlMs: Number(process.env.CODEX_REMOTE_CONTACT_QQ_MEDIA_TTL_MS || Number(settings.qq?.media?.orphanTtlDays || 7) * 24 * 60 * 60 * 1000)
+  maxImageBytes: Number(process.env.WORKBUDDY_QQ_IMAGE_MAX_BYTES || settings.qq?.media?.maxImageBytes || 20 * 1024 * 1024),
+  maxAttachmentBytes: Number(process.env.WORKBUDDY_QQ_ATTACHMENT_MAX_BYTES || settings.qq?.media?.maxAttachmentBytes || 1024 * 1024 * 1024),
+  orphanTtlMs: Number(process.env.WORKBUDDY_QQ_MEDIA_TTL_MS || defaultMediaTtlMs),
+  maxTotalBytes: Number(process.env.WORKBUDDY_QQ_MEDIA_MAX_BYTES || settings.qq?.media?.maxTotalBytes || 200 * 1024 * 1024)
 });
 await mediaManager.init();
+const storageHygiene = new StorageHygieneManager({
+  runtimeDir,
+  dataDir,
+  mediaRoot,
+  stickerLibraryDir,
+  logsDir: join(runtimeDir, "logs"),
+  tempJobDirs: [stickerLabelWorkspaceRoot, stickerCurationWorkspaceRoot],
+  removedTargetsDir: join(dataDir, "removed-targets"),
+  mediaManager,
+  sessionStores: [store, privateStore],
+  subscriptionStore,
+  qzoneStore,
+  fileManager,
+  referencedMedia
+});
 const stickerManager = new QqStickerStore({
   filePath: stickerStorePath,
   libraryDir: stickerLibraryDir,
   oneBot,
   fileManager,
-  maxPromptItems: Number(process.env.CODEX_REMOTE_CONTACT_QQ_STICKER_PROMPT_LIMIT || settings.qq?.stickers?.promptLimit || 24)
+  maxPromptItems: Number(process.env.WORKBUDDY_QQ_STICKER_PROMPT_LIMIT || settings.qq?.stickers?.promptLimit || 24)
 });
 await stickerManager.init();
 const removedInvalidStickers = await stickerManager.removeInvalidEntries();
@@ -268,32 +286,21 @@ await stickerManager.retryPendingFavorites().catch((error) => {
   console.warn(`QQ sticker favorite recovery failed: ${error.message}`);
 });
 
-const agentTimeoutMs = Number(process.env.CODEX_REMOTE_CONTACT_QQ_AGENT_TIMEOUT_MS || 10 * 60 * 1000);
-const codex = engineKind === "codex"
-  ? new CodexClient({
-      executable: codexExecutable,
-      executableArgs: codexExecutableArgs,
-      cwd: projectDir,
-      model: codexModel,
-      effort: codexEffort,
-      timeoutMs: agentTimeoutMs
-    })
-  : new WorkBuddyClient({
-      // python / bridgePath 默认取 CODEX_REMOTE_CONTACT_WB_PYTHON 与模块内路径
-      cwd: projectDir,
-      model: codexModel,
-      effort: codexEffort,
-      systemPrompt: personaStore.systemPromptForClient(),
-      timeoutMs: agentTimeoutMs,
-      onTurnEvent: (event) => recordEvent({ ...event, at: new Date().toISOString() })
-    });
-console.log(`agent engine: ${engineKind} (model=${codexModel}, effort=${codexEffort})`);
-let codexModels = engineKind === "workbuddy"
-  ? fallbackWorkBuddyModels(codexModel, codexEffort)
-  : fallbackCodexModels(codexModel, codexEffort);
+const agentTimeoutMs = Number(process.env.WORKBUDDY_QQ_AGENT_TIMEOUT_MS || 10 * 60 * 1000);
+const agent = new WorkBuddyClient({
+  // python / bridgePath 默认取 WORKBUDDY_QQ_WB_PYTHON 与模块内路径
+  cwd: defaultAgentCwd,
+  model: defaultModel,
+  effort: defaultEffort,
+  systemPrompt: personaStore.systemPromptForClient(),
+  timeoutMs: agentTimeoutMs,
+  onTurnEvent: (event) => recordEvent({ ...event, at: new Date().toISOString() })
+});
+console.log(`agent engine: workbuddy (model=${defaultModel}, effort=${defaultEffort})`);
+let availableModels = fallbackWorkBuddyModels(defaultModel, defaultEffort);
 const automationClient = new MacActionClient();
 const stickerLabeler = new EphemeralStickerLabeler({
-  codex,
+  agent,
   stickerManager,
   workspaceRoot: stickerLabelWorkspaceRoot,
   getSettings: () => stickerLabelSettingsStore.snapshot(),
@@ -322,19 +329,21 @@ for (const [id, groupId] of Object.entries(sharedContexts.state.privateGroups)) 
     || targetAllowlist.isRemoved("private", id)) throw new Error("共享上下文指向未启用的群或私聊，请先修正 context-links.json");
 }
 const homeAssistant = new HomeAssistantClient({
-  enabled: process.env.CODEX_REMOTE_CONTACT_HA_ENABLED === "1",
-  baseUrl: process.env.CODEX_REMOTE_CONTACT_HA_BASE_URL || "",
-  token: process.env.CODEX_REMOTE_CONTACT_HA_TOKEN || "",
-  allowedButtons: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_BUTTONS || "").split(",")),
-  allowedSpeakers: uniqueStrings(String(process.env.CODEX_REMOTE_CONTACT_HA_ALLOWED_SPEAKERS || "").split(","))
+  enabled: process.env.WORKBUDDY_QQ_HA_ENABLED === "1",
+  baseUrl: process.env.WORKBUDDY_QQ_HA_BASE_URL || "",
+  token: process.env.WORKBUDDY_QQ_HA_TOKEN || "",
+  greetingSpeaker: process.env.WORKBUDDY_QQ_HA_GREETING_SPEAKER
+    ?? uniqueStrings(String(process.env.WORKBUDDY_QQ_HA_ALLOWED_SPEAKERS || "").split(","))[0] ?? ""
 });
-const speakerGreetingsAvailable = homeAssistant.enabled && Boolean(homeAssistant.baseUrl && homeAssistant.token && homeAssistant.allowedSpeakers.size);
-const speakerWeatherLocation = parseSpeakerWeatherLocation(process.env.CODEX_REMOTE_CONTACT_SPEAKER_WEATHER_LOCATION);
+const speakerGreetingsAvailable = homeAssistant.configured;
+const speakerWeatherLocation = parseSpeakerWeatherLocation(process.env.WORKBUDDY_QQ_SPEAKER_WEATHER_LOCATION);
 const worker = new GroupWorker({
-  store, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager, subscriptionStore, automationClient, persona: personaStore,
+  store, agent, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager, subscriptionStore, automationClient, persona: personaStore,
   homeAssistant,
   targetNameResolver: (groupId) => groupMetadata[groupId]?.groupName || null,
   knownMemberIds: (groupId) => groupMemberDirectory.knownMemberIds(groupId),
+  groupMemberDirectory,
+  defaultCwd: defaultAgentCwd,
   sharedWorkspaceRoot: groupWorkspaceRoot,
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && allowedGroups.includes(String(id)) && !removingTargets.has(`group:${id}`)
@@ -342,9 +351,11 @@ const worker = new GroupWorker({
   onEvent: recordEvent
 });
 const privateWorker = new PrivateWorker({
-  store: privateStore, codex, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager: privateTriggerManager, subscriptionStore, automationClient, persona: personaStore,
+  store: privateStore, agent, oneBot, mediaManager, fileManager, stickerManager, stickerLabeler, triggerManager: privateTriggerManager, subscriptionStore, automationClient, persona: personaStore,
   homeAssistant,
   targetNameResolver: (userId) => privateMetadata[userId]?.displayName || null,
+  workspaceRoot: privateWorkspaceRoot,
+  defaultCwd: defaultAgentCwd,
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && !targetAllowlist.isRemoved("private", id) && !removingTargets.has(`private:${id}`)
     && !contextLinkChanges.has(`private:${id}`) && !sharedContexts.isCancelled("private", id),
@@ -383,7 +394,7 @@ const speakerGreetings = new SpeakerGreetingCoordinator({
 await speakerGreetings.init();
 const stickerCuration = new StickerCurationCoordinator({
   filePath: stickerCurationPath, stickerManager, gate: taskGate,
-  selector: new EphemeralStickerCurator({ codex, workspaceRoot: stickerCurationWorkspaceRoot,
+  selector: new EphemeralStickerCurator({ agent, workspaceRoot: stickerCurationWorkspaceRoot,
     getSettings: () => stickerLabelSettingsStore.snapshot(), canRun: () => agentDispatchStore.isEnabled() }),
   canRun: () => agentDispatchStore.isEnabled(), onEvent: recordEvent
 });
@@ -392,10 +403,12 @@ triggerManager.setWorker(worker);
 privateTriggerManager.setWorker(privateWorker);
 triggerManager.start();
 
+let lanControl = null;
+
 const threadReservations = new ThreadReservationManager({
-  codex,
+  agent,
   listTargets: reservationTargets,
-  intervalMs: Number(process.env.CODEX_REMOTE_CONTACT_THREAD_LOCK_INTERVAL_MS || 15_000),
+  intervalMs: Number(process.env.WORKBUDDY_QQ_THREAD_LOCK_INTERVAL_MS || 15_000),
   onChange: () => broadcast({ type: "thread-reservations", state: publicState() })
 });
 await threadReservations.start();
@@ -427,14 +440,35 @@ subscriptionTimer.unref?.();
 await checkSubscriptionSchedule();
 await checkRateLimitRecovery();
 
-mediaManager.cleanupOrphans(referencedMedia()).catch((error) => console.warn(`QQ media cleanup failed: ${error.message}`));
-const mediaCleanupTimer = setInterval(() => {
-  mediaManager.cleanupOrphans(referencedMedia()).catch((error) => console.warn(`QQ media cleanup failed: ${error.message}`));
-}, 6 * 60 * 60 * 1000);
-mediaCleanupTimer.unref?.();
+const bootHygieneTimer = setTimeout(() => {
+  storageHygiene.runCleanup().catch((error) => console.warn(`Storage hygiene cleanup failed: ${error.message}`));
+}, 15_000);
+bootHygieneTimer.unref?.();
+const bootQzoneTimer = setTimeout(() => {
+  qzone.refreshTodayFeeds().catch(() => {});
+}, 3_000);
+bootQzoneTimer.unref?.();
+const storageHygieneTimer = setInterval(() => {
+  storageHygiene.runCleanup().catch((error) => console.warn(`Storage hygiene cleanup failed: ${error.message}`));
+}, 60 * 60 * 1000);
+storageHygieneTimer.unref?.();
+let metadataSyncedOnce = false;
+let metadataRefreshPromise = null;
+function persistMetadataCache() {
+  return metadataCache.save({ groups: groupMetadata, privateChats: privateMetadata })
+    .catch((error) => console.warn(`Unable to persist QQ metadata cache: ${error.message}`));
+}
 refreshGroupMetadata().catch((error) => console.warn(`QQ group metadata refresh failed: ${error.message}`));
+const bootMetadataTimer = setInterval(() => {
+  if (metadataSyncedOnce) {
+    clearInterval(bootMetadataTimer);
+    return;
+  }
+  refreshGroupMetadata().catch(() => {});
+}, 15_000);
+bootMetadataTimer.unref?.();
 const groupMetadataTimer = setInterval(() => {
-  refreshGroupMetadata().catch((error) => console.warn(`QQ group metadata refresh failed: ${error.message}`));
+  refreshGroupMetadata({ force: true }).catch((error) => console.warn(`QQ group metadata refresh failed: ${error.message}`));
 }, 10 * 60 * 1000);
 groupMetadataTimer.unref?.();
 
@@ -452,8 +486,21 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(hubPort, hubHost, () => console.log(`codexremotecontact QQ Agent gateway: http://${hubHost}:${hubPort}`));
-refreshCodexModels().catch((error) => console.warn(`Unable to refresh Codex model catalog: ${error.message}`));
+lanControl = new LanControlServer({
+  filePath: join(dataDir, "lan-panel.json"),
+  hubPort,
+  publicDir,
+  handleAuthorizedApi: (req, res, url, rawBody) => handleAuthorizedApi(req, res, url, rawBody),
+  serveStatic,
+  onEvent: recordEvent,
+  disableBonjour: process.env.WORKBUDDY_QQ_DISABLE_BONJOUR === "1",
+  defaultEnabled: process.env.WORKBUDDY_QQ_LAN_ENABLED === "1",
+  defaultPort: Number(process.env.WORKBUDDY_QQ_LAN_PORT || 3790)
+});
+await lanControl.init();
+
+server.listen(hubPort, hubHost, () => console.log(`WorkBuddy QQ Agent Gateway: http://${hubHost}:${hubPort}`));
+refreshAvailableModels().catch((error) => console.warn(`Unable to refresh WorkBuddy model catalog: ${error.message}`));
 
 async function handleApi(req, res, url) {
   if (req.method === "OPTIONS") {
@@ -461,17 +508,52 @@ async function handleApi(req, res, url) {
     res.end();
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/health") {
+    sendJson(res, 200, { ok: true, pid: process.pid, version: packageVersion });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/lan-auth/status") {
+    sendJson(res, 200, { lanMode: false, authenticated: true });
+    return;
+  }
   const rawBody = req.method === "POST" ? await readRawBody(req) : null;
   if (!isAuthorized(req, url.pathname, rawBody)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/lan-panel/status") {
+    sendJson(res, 200, lanControl.status());
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/lan-panel/config") {
+    if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+      sendJson(res, 415, { error: "Content-Type must be application/json" });
+      return;
+    }
+    const body = parseJson(rawBody);
+    const updated = await lanControl.configure(body);
+    broadcast({ type: "metadata", state: publicState() });
+    sendJson(res, 200, updated);
+    return;
+  }
+  await handleAuthorizedApi(req, res, url, rawBody);
+}
+
+async function handleAuthorizedApi(req, res, url, rawBody) {
   if (req.method === "POST" && !String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
     sendJson(res, 415, { error: "Content-Type must be application/json" });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/state") {
+    if (url.searchParams.get("refresh") === "1") {
+      await refreshGroupMetadata({ force: true }).catch((error) => console.warn(`On-demand metadata refresh failed: ${error.message}`));
+    }
     sendJson(res, 200, publicState());
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/qq/metadata/refresh") {
+    await refreshGroupMetadata({ force: true });
+    sendJson(res, 200, { ok: true, state: publicState() });
     return;
   }
   const diagnosticsMatch = /^\/api\/qq\/(groups|private)\/(\d+)\/diagnostics$/u.exec(url.pathname);
@@ -481,7 +563,7 @@ async function handleApi(req, res, url) {
     assertTarget(type, id);
     const conversation = (type === "private" ? privateStore : store).snapshot(id);
     const shared = sharedContexts.contextFor(type, id);
-    sendJson(res, 200, { diagnostics: codex.diagnostics?.snapshot(shared ? shared.group.threadId : conversation.threadId, { includeInput: true }) || null });
+    sendJson(res, 200, { diagnostics: agent.diagnostics?.snapshot(shared ? shared.group.threadId : conversation.threadId, { includeInput: true }) || null });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/qq/persona/name") {
@@ -489,7 +571,7 @@ async function handleApi(req, res, url) {
     let name;
     try { name = await personaStore.setName(body.name); }
     catch (error) { throw new HttpError(400, error.message); }
-    codex.setSystemPrompt?.(personaStore.systemPromptForClient());
+    agent.setSystemPrompt?.(personaStore.systemPromptForClient());
     recordEvent({ type: "persona-name-updated", at: new Date().toISOString() });
     sendJson(res, 200, { name, persona: personaStore.publicState() });
     return;
@@ -499,9 +581,44 @@ async function handleApi(req, res, url) {
     let saved;
     try { saved = await personaStore.stageCatchphrases(body.catchphrases); }
     catch (error) { throw new HttpError(400, error.message); }
-    codex.setSystemPrompt?.(personaStore.systemPromptForClient());
+    agent.setSystemPrompt?.(personaStore.systemPromptForClient());
     recordEvent({ type: "persona-catchphrases-updated", count: saved.entries.length, at: new Date().toISOString() });
     sendJson(res, 200, { ...saved, persona: personaStore.publicState() });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/qq/persona/export") {
+    const bundle = personaStore.exportBundle();
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": "attachment; filename=\"agent-persona.laodai-persona.json\"",
+      "cache-control": "no-store",
+      ...corsHeaders()
+    });
+    res.end(`${JSON.stringify(bundle, null, 2)}\n`);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/qq/persona/import") {
+    const body = parseJson(rawBody);
+    let imported;
+    try { imported = await personaStore.importBundle(body); }
+    catch (error) { throw new HttpError(400, error.message); }
+    agent.setSystemPrompt?.(personaStore.systemPromptForClient());
+    recordEvent({
+      type: "persona-imported",
+      exampleCount: imported.exampleCount,
+      catchphraseCount: imported.catchphraseCount,
+      at: new Date().toISOString()
+    });
+    broadcast({ type: "metadata", state: publicState() });
+    sendJson(res, 200, imported);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/qq/persona/reset-imported") {
+    const reset = await personaStore.resetImported();
+    agent.setSystemPrompt?.(personaStore.systemPromptForClient());
+    recordEvent({ type: "persona-reset", at: new Date().toISOString() });
+    broadcast({ type: "metadata", state: publicState() });
+    sendJson(res, 200, reset);
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/qq/stickers") {
@@ -528,6 +645,13 @@ async function handleApi(req, res, url) {
     });
     recordEvent({ type: "qzone-settings-updated", targetType, targetId, at: new Date().toISOString() });
     sendJson(res, 200, { ...saved, scheduleTimes: qzoneScheduleTimes });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/qq/qzone/refresh-today") {
+    const qzoneState = await qzone.refreshTodayFeeds();
+    broadcast({ type: "qzone-activity", state: publicState() });
+    recordEvent({ type: "qzone-today-refreshed", count: qzoneState.todayFeeds?.length || 0, at: new Date().toISOString() });
+    sendJson(res, 200, { ...qzoneState, scheduleTimes: qzoneScheduleTimes });
     return;
   }
   const stickerImage = url.pathname.match(/^\/api\/qq\/stickers\/(st_[a-f0-9]{12,64})\/image$/i);
@@ -594,7 +718,7 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/qq/stickers/label-settings") {
     const body = parseJson(rawBody);
     const model = String(body.model || "").trim();
-    if (!codexModels.some((item) => item.model === model)) {
+    if (!availableModels.some((item) => item.model === model)) {
       throw new HttpError(400, "请选择当前 Agent 账号真实可用的临时任务模型");
     }
     const labeling = await stickerLabelSettingsStore.setModel(model);
@@ -602,8 +726,27 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, { ...labeling, ephemeralSession: true, retainsContext: false });
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/qq/login-status") {
+    const status = await oneBot.loginStatus();
+    if (status.ok && !metadataSyncedOnce) {
+      refreshGroupMetadata().catch(() => {});
+    }
+    sendJson(res, 200, status);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/maintenance") {
     sendJson(res, 200, await maintenanceState());
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/maintenance/storage") {
+    sendJson(res, 200, await storageHygiene.inspect());
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/maintenance/storage/cleanup") {
+    const result = await storageHygiene.runCleanup({ aggressive: true });
+    recordEvent({ type: "storage-cleaned", freedBytes: result.freedBytes, removedItems: result.removedItems, at: new Date().toISOString() });
+    sendJson(res, 200, result);
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/qq/agent-dispatch") {
@@ -730,18 +873,39 @@ async function handleApi(req, res, url) {
       speakerGreetingBusy(targetType, targetId))) throw new HttpError(409, "会话仍有进行中或排队的任务，请结束后再修改设置");
     const input = parseJson(rawBody);
     if (targetType === "private" && sharedContexts.groupFor(targetType, targetId)) {
-      for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) input[key] = conversation.codexConfig?.[key];
+      for (const key of ["model", "reasoningEffort", "contextTokenLimit"]) input[key] = conversation.agentConfig?.[key];
     }
-    const config = validateCodexConfig(input, { targetType, currentConfig: conversation.codexConfig });
-    const saved = await targetStore.setCodexConfig(targetId, config);
-    if (saved.model !== conversation.codexConfig.model) {
+    const config = validateAgentConfig(input, { targetType, currentConfig: conversation.agentConfig });
+    const enablingGroupAdmin = targetType === "group" && (
+      (config.groupEssenceEnabled && conversation.agentConfig?.groupEssenceEnabled !== true)
+      || (config.groupMuteEnabled && conversation.agentConfig?.groupMuteEnabled !== true)
+    );
+    if (enablingGroupAdmin) {
+      let role = groupMetadata[targetId]?.botRole || null;
+      if (AGENT_QQ_ID) {
+        try {
+          const member = await oneBot.getGroupMemberInfo(targetId, AGENT_QQ_ID, { noCache: true });
+          if (String(member?.user_id || "") === String(AGENT_QQ_ID)) {
+            role = String(member.role || "member").toLowerCase();
+            const prev = groupMetadata[targetId] || availableGroupMetadata[targetId] || { groupId: targetId, groupName: null };
+            groupMetadata[targetId] = { ...prev, botRole: role };
+            availableGroupMetadata[targetId] = { ...prev, botRole: role };
+          }
+        } catch { /* fall back to cached role */ }
+      }
+      if (!["admin", "owner"].includes(String(role || "").toLowerCase())) {
+        throw new HttpError(400, "机器人当前不是该群管理员，无法开启群管自主权限；请先在 QQ 将机器人设为管理员并刷新。");
+      }
+    }
+    const saved = await targetStore.setAgentConfig(targetId, config);
+    if (saved.model !== conversation.agentConfig.model) {
       const restoredSubscriptions = await subscriptionStore.retryRateLimitedForTarget(targetType, targetId);
       const manager = targetType === "private" ? privateTriggerManager : triggerManager;
       if (restoredSubscriptions) await manager.request(targetId, "subscription_auto", {});
       else if (conversation.pendingMessages.length || conversation.pendingTrigger) await manager.request(targetId, "retry", {});
     }
-    recordEvent({ type: "codex-config-updated", targetType, targetId, codexConfig: saved, at: new Date().toISOString() });
-    sendJson(res, 200, { status: "saved", targetType, targetId, codexConfig: saved });
+    recordEvent({ type: "agent-config-updated", targetType, targetId, agentConfig: saved, at: new Date().toISOString() });
+    sendJson(res, 200, { status: "saved", targetType, targetId, agentConfig: saved });
     return;
   }
   const targetAction = url.pathname.match(/^\/api\/qq\/(groups|private)\/([^/]+)\/(retry|reset|session)$/);
@@ -800,9 +964,40 @@ async function handleApi(req, res, url) {
       targetWorker.followup.cancelled.delete(id);
       oneBot.setReadOnlyGroupIds(subscriptionStore.sourceGroupIds());
       await mediaManager.removeMessages(result.removedMessages);
+      const workspaceRoot = resolve(type === "group" ? groupWorkspaceRoot : privateWorkspaceRoot);
+      const targetWorkspaceDir = resolve(workspaceRoot, id);
+      let threadDeleted = !result.threadId;
+      if (result.threadId && typeof agent.deleteThread === "function") {
+        try {
+          const delRes = await agent.deleteThread(result.threadId, {
+            cwd: targetWorkspaceDir.startsWith(`${workspaceRoot}${sep}`) ? targetWorkspaceDir : defaultAgentCwd,
+            deletePersistent: true
+          });
+          threadDeleted = delRes?.deleted !== false;
+        } catch (error) {
+          console.warn(`WorkBuddy thread cleanup after target deletion failed (${type}:${id}): ${error.message}`);
+        }
+      }
+      let workspaceDeleted = false;
+      if (targetWorkspaceDir.startsWith(`${workspaceRoot}${sep}`)) {
+        await rm(targetWorkspaceDir, { recursive: true, force: true }).catch(() => {});
+        workspaceDeleted = true;
+      }
+      if (type === "group") {
+        await groupMemberDirectory.forgetGroup(id).catch(() => {});
+      }
+      await persistMetadataCache();
       threadReservations.reconcile().catch((error) => console.warn(`Thread lock refresh after removal failed: ${error.message}`));
-      recordEvent({type:"target-deleted",targetType:type,targetId:id,at:new Date().toISOString()});
-      sendJson(res,200,{removed:true,targetType:type,targetId:id,archived:Boolean(result.archiveFile),subscriptionCount:result.subscriptionCount});
+      recordEvent({ type: "target-deleted", targetType: type, targetId: id, threadDeleted, workspaceDeleted, at: new Date().toISOString() });
+      sendJson(res, 200, {
+        removed: true,
+        targetType: type,
+        targetId: id,
+        archived: Boolean(result.archiveFile),
+        threadDeleted,
+        workspaceDeleted,
+        subscriptionCount: result.subscriptionCount
+      });
     } finally { removingTargets.delete(key); }
     return;
   }
@@ -816,6 +1011,29 @@ async function handleApi(req, res, url) {
       .filter((item) => /^\d{5,14}$/u.test(item.groupId) && !unavailable.has(item.groupId))
       .sort((a, b) => a.groupName.localeCompare(b.groupName, "zh-CN") || a.groupId.localeCompare(b.groupId));
     sendJson(res, 200, { groups });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/qq/friends/available") {
+    let rawFriends;
+    try { rawFriends = await oneBot.getFriendList(); }
+    catch { throw new HttpError(503, "暂时无法读取机器人好友列表，请确认 QQ 在线后重试"); }
+    const existing = new Set(privateStore.listGroups().map((item) => item.groupId));
+    const deduped = new Map();
+    for (const item of rawFriends) {
+      const userId = String(item?.user_id || "");
+      if (!/^\d{5,14}$/u.test(userId) || userId === AGENT_QQ_ID || existing.has(userId)) continue;
+      const nickname = String(item?.nickname || "").trim().slice(0, 100);
+      const remark = String(item?.remark || "").trim().slice(0, 100);
+      const displayName = remark || nickname || null;
+      if (!deduped.has(userId)) {
+        deduped.set(userId, { userId, nickname: nickname || null, remark: remark || null, displayName });
+      }
+    }
+    const friends = [...deduped.values()].sort((a, b) =>
+      String(a.displayName || a.userId).localeCompare(String(b.displayName || b.userId), "zh-CN")
+      || a.userId.localeCompare(b.userId)
+    );
+    sendJson(res, 200, { friends });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/qq/groups") {
@@ -834,13 +1052,23 @@ async function handleApi(req, res, url) {
     if (!result.added) throw new HttpError(409, "这个群已经在 Agent 白名单中");
     allowedGroups.push(groupId);
     triggerManager.allowGroup(groupId);
-    const metadata = { groupId, groupName: String(info.group_name || "").trim().slice(0, 100) || null };
+    let botRole = null;
+    if (AGENT_QQ_ID) {
+      try {
+        const member = await oneBot.getGroupMemberInfo(groupId, AGENT_QQ_ID, { noCache: true });
+        if (String(member?.user_id || "") === String(AGENT_QQ_ID) || member?.role) {
+          botRole = String(member.role || "member").toLowerCase();
+        }
+      } catch { /* role stays null until next sync */ }
+    }
+    const metadata = { groupId, groupName: String(info.group_name || "").trim().slice(0, 100) || null, botRole };
     groupMetadata[groupId] = metadata;
     availableGroupMetadata[groupId] = metadata;
+    await persistMetadataCache();
     await groupMemberDirectory.initGroup(groupId)
       .catch((error) => console.warn(`QQ member directory initialization failed for ${groupId}: ${error.message}`));
     recordEvent({ type: "group-target-created", groupId, at: new Date().toISOString() });
-    sendJson(res, 201, { status: "created", groupId, groupName: metadata.groupName });
+    sendJson(res, 201, { status: "created", groupId, groupName: metadata.groupName, botRole });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/qq/private-chats") {
@@ -853,7 +1081,8 @@ async function handleApi(req, res, url) {
     await privateStore.addConversation(userId);
     privateTriggerManager.allowGroup(userId);
     privateMetadata[userId] ||= { displayName: String(body.displayName || "").trim() || null };
-    refreshPrivateMetadata(userId).catch(() => {});
+    await persistMetadataCache();
+    refreshPrivateMetadata(userId).then(() => persistMetadataCache()).catch(() => {});
     recordEvent({ type: "private-target-created", userId, at: new Date().toISOString() });
     sendJson(res, 201, { status: "created", userId });
     return;
@@ -894,6 +1123,19 @@ async function handleOneBotEvent(payload) {
   if (isGroupPokeEvent(payload)) return handleGroupPoke(payload);
   if (payload?.post_type === "notice" && ["group_recall", "friend_recall"].includes(payload?.notice_type)) {
     return handleMessageRecall(payload);
+  }
+  if (payload?.post_type === "notice" && payload?.notice_type === "group_admin") {
+    const groupId = String(payload.group_id || "");
+    if (groupId && AGENT_QQ_ID && String(payload.user_id || "") === String(AGENT_QQ_ID) && allowedGroups.includes(groupId)) {
+      const role = payload.sub_type === "set" ? "admin" : "member";
+      const prev = groupMetadata[groupId] || availableGroupMetadata[groupId] || { groupId, groupName: null };
+      groupMetadata[groupId] = { ...prev, botRole: role };
+      availableGroupMetadata[groupId] = { ...prev, botRole: role };
+      persistMetadataCache();
+      broadcast({ type: "metadata", state: publicState() });
+      return { status: "ok", groupId, botRole: role };
+    }
+    return { ignored: true, reason: "Group admin notice for another user or unmanaged group" };
   }
   if (payload?.post_type !== "message" || !["group", "private"].includes(payload?.message_type)) {
     return { ignored: true, reason: "Only QQ group and private messages are handled" };
@@ -1180,9 +1422,9 @@ async function appendUiOwnerMessage(targetType, targetId, text) {
   const manager = targetType === "private" ? privateTriggerManager : triggerManager;
   const now = new Date();
   const message = await targetStore.appendMessage({
-    messageId: `codex-ui-${randomUUID()}`, groupId: targetId, senderId: OWNER_QQ_ID, senderName: "OWNER", senderRole: "member",
+    messageId: `gateway-ui-${randomUUID()}`, groupId: targetId, senderId: OWNER_QQ_ID, senderName: "OWNER", senderRole: "member",
     timestamp: now.toISOString(), displayTime: formatLocalTime(now), text, images: [], attachments: [], mentionedBot: true,
-    replyToMessageId: null, trust: "OWNER", source: "codex-ui", rawType: targetType
+    replyToMessageId: null, trust: "OWNER", source: "gateway-ui", rawType: targetType
   });
   recordEvent({ type: targetType === "private" ? "private-message" : "message", targetType, targetId, message, at: now.toISOString() });
   const control = parseOwnerControlCommand(message);
@@ -1247,7 +1489,7 @@ function publicState() {
     return [group.groupId, {
       ...view,
       contextQueue: sharedContexts.snapshot("group", group.groupId),
-      diagnostics: codex.diagnostics?.snapshot(group.threadId) || null,
+      diagnostics: agent.diagnostics?.snapshot(group.threadId) || null,
       qzoneActivity: qzone.activityFor("group", group.groupId),
       speakerGreetingActivity: speakerGreetings.activityFor("group", group.groupId),
       targetType: "group",
@@ -1262,16 +1504,16 @@ function publicState() {
     const view = toPublicGroupState(conversation, liveByPrivate[conversation.groupId], { groupName: metadata.displayName || null });
     const contextLink = contextLinkView(conversation.groupId);
     const threadId = contextLink ? contextLink.threadId : conversation.threadId;
-    const effectiveCodexConfig = contextLink ? {
-      ...conversation.codexConfig,
-      ...Object.fromEntries(["model", "reasoningEffort", "contextTokenLimit"].map((key) => [key, store.snapshot(contextLink.groupId).codexConfig?.[key]]))
-    } : conversation.codexConfig;
+    const effectiveAgentConfig = contextLink ? {
+      ...conversation.agentConfig,
+      ...Object.fromEntries(["model", "reasoningEffort", "contextTokenLimit"].map((key) => [key, store.snapshot(contextLink.groupId).agentConfig?.[key]]))
+    } : conversation.agentConfig;
     return [conversation.groupId, {
       ...view,
-      threadId, contextLink, effectiveCodexConfig,
+      threadId, contextLink, effectiveAgentConfig,
       threadCreatedAt: contextLink ? store.snapshot(contextLink.groupId).threadCreatedAt : conversation.threadCreatedAt,
       contextQueue: sharedContexts.snapshot("private", conversation.groupId),
-      diagnostics: codex.diagnostics?.snapshot(threadId) || null,
+      diagnostics: agent.diagnostics?.snapshot(threadId) || null,
       qzoneActivity: qzone.activityFor("private", conversation.groupId),
       speakerGreetingActivity: speakerGreetings.activityFor("private", conversation.groupId),
       userId: conversation.groupId,
@@ -1302,15 +1544,16 @@ function publicState() {
     architecture: "target-owned-read-only-source-subscriptions",
     agentDispatch: agentDispatchStore.snapshot(),
     persona: personaStore.publicState(),
+    lanPanel: lanControl?.status() ?? null,
     taskGate: taskGate.snapshot(),
     ai: {
-      provider: engineKind === "codex" ? "codex-app-server" : "workbuddy-agent-sdk",
-      model: codexModel,
-      reasoningEffort: codexEffort,
+      provider: "workbuddy-agent-sdk",
+      model: defaultModel,
+      reasoningEffort: defaultEffort,
       persistentThreads: true,
-      autoCompactTokenLimit: codexAutoCompactTokenLimit,
-      autoCompactTokenScope: codexAutoCompactTokenScope,
-      availableModels: codexModels,
+      autoCompactTokenLimit,
+      autoCompactTokenScope,
+      availableModels,
       contextTokenOptions,
       permissionModeOptions,
       homeAssistantPermissionOptions,
@@ -1328,8 +1571,8 @@ function publicState() {
       availableSourceGroups,
       stickers: { ...stickerManager.publicState(), labeling: stickerLabelingState(), curation: stickerCuration.snapshot() },
       qzone: { ...qzoneStore.publicState(), scheduleTimes: qzoneScheduleTimes },
-      activeTargets: [...new Set([...codex.activeGroups(), ...worker.running.keys(), ...[...privateWorker.running.keys()].map((id) => `private:${id}`)])],
-      activeGroups: [...new Set([...codex.activeGroups().filter((id) => !id.startsWith("private:")), ...worker.running.keys()])],
+      activeTargets: [...new Set([...agent.activeGroups(), ...worker.running.keys(), ...[...privateWorker.running.keys()].map((id) => `private:${id}`)])],
+      activeGroups: [...new Set([...agent.activeGroups().filter((id) => !id.startsWith("private:")), ...worker.running.keys()])],
       events: recentEvents
     }
   };
@@ -1400,25 +1643,85 @@ function recoverConversation(conversation, manager) {
   else if (!conversation.lastError && conversation.pendingMessages.length) manager.reconsiderPending(conversation.groupId).catch(console.warn);
 }
 
-async function refreshGroupMetadata() {
-  let groups = [];
+async function refreshGroupMetadata({ force = false } = {}) {
+  if (metadataRefreshPromise && !force) return metadataRefreshPromise;
+  if (metadataRefreshPromise && force) await metadataRefreshPromise.catch(() => {});
+  const run = (async () => {
+    let groups = [];
+    let synced = false;
+    try {
+      groups = await oneBot.getGroupList();
+      if (Array.isArray(groups) && groups.length) synced = true;
+    } catch {
+      groups = (await Promise.allSettled(allowedGroups.map((groupId) => oneBot.getGroupInfo(groupId))))
+        .filter((result) => result.status === "fulfilled" && result.value)
+        .map((result) => result.value);
+      if (groups.length) synced = true;
+    }
+    for (const info of groups) {
+      const groupId = String(info?.group_id || "");
+      if (!groupId) continue;
+      const prev = availableGroupMetadata[groupId] || groupMetadata[groupId] || {};
+      const metadata = { ...prev, groupId, groupName: String(info?.group_name || "").trim() || prev.groupName || null };
+      availableGroupMetadata[groupId] = metadata;
+      if (allowedGroups.includes(groupId)) groupMetadata[groupId] = metadata;
+      if (subscriptionStore.sourceGroupIds().includes(groupId)) await subscriptionStore.setSourceMetadata(groupId, metadata);
+    }
+
+    let activeBotId = AGENT_QQ_ID;
+    if (!activeBotId) {
+      const loginInfo = await oneBot.getLoginInfo().catch(() => null);
+      if (loginInfo?.data?.user_id != null) activeBotId = String(loginInfo.data.user_id);
+    }
+    if (activeBotId) {
+      await Promise.allSettled(allowedGroups.map(async (groupId) => {
+        try {
+          const member = await oneBot.getGroupMemberInfo(groupId, activeBotId, { noCache: true });
+          if (member && (String(member.user_id || "") === String(activeBotId) || member.role)) {
+            const prev = groupMetadata[groupId] || availableGroupMetadata[groupId] || { groupId, groupName: null };
+            const role = String(member.role || "member").toLowerCase();
+            groupMetadata[groupId] = { ...prev, botRole: role };
+            availableGroupMetadata[groupId] = { ...prev, botRole: role };
+            synced = true;
+          }
+        } catch { /* keep previous role if OneBot member lookup fails */ }
+      }));
+    }
+
+    const friendsById = new Map();
+    try {
+      const friends = await oneBot.getFriendList();
+      for (const friend of friends) {
+        const uid = String(friend?.user_id || "");
+        if (/^\d{5,14}$/u.test(uid)) friendsById.set(uid, friend);
+      }
+      if (friends.length) synced = true;
+    } catch { /* ignore if offline */ }
+
+    await Promise.allSettled(privateStore.listGroups().map(async (item) => {
+      const friend = friendsById.get(item.groupId);
+      if (friend) {
+        const name = String(friend.remark || friend.nickname || "").trim();
+        if (name) {
+          privateMetadata[item.groupId] = { displayName: name };
+          return;
+        }
+      }
+      await refreshPrivateMetadata(item.groupId);
+    }));
+
+    if (synced) {
+      metadataSyncedOnce = true;
+      await persistMetadataCache();
+    }
+    broadcast({ type: "metadata", state: publicState() });
+  })();
+  metadataRefreshPromise = run;
   try {
-    groups = await oneBot.getGroupList();
-  } catch {
-    groups = (await Promise.allSettled(allowedGroups.map((groupId) => oneBot.getGroupInfo(groupId))))
-      .filter((result) => result.status === "fulfilled" && result.value)
-      .map((result) => result.value);
+    await run;
+  } finally {
+    if (metadataRefreshPromise === run) metadataRefreshPromise = null;
   }
-  for (const info of groups) {
-    const groupId = String(info?.group_id || "");
-    if (!groupId) continue;
-    const metadata = { groupId, groupName: String(info?.group_name || "").trim() || null };
-    availableGroupMetadata[groupId] = metadata;
-    if (allowedGroups.includes(groupId)) groupMetadata[groupId] = metadata;
-    if (subscriptionStore.sourceGroupIds().includes(groupId)) await subscriptionStore.setSourceMetadata(groupId, metadata);
-  }
-  await Promise.allSettled(privateStore.listGroups().map((item) => refreshPrivateMetadata(item.groupId)));
-  broadcast({ type: "metadata", state: publicState() });
 }
 
 async function refreshOneSourceMetadata(groupId) {
@@ -1434,27 +1737,41 @@ async function refreshPrivateMetadata(userId) {
 }
 
 async function maintenanceState() {
-  let oneBotStatus = null;
-  let oneBotError = null;
-  try {
-    const [login, status] = await Promise.all([oneBot.getLoginInfo(), oneBot.getStatus()]);
-    oneBotStatus = { login: login.data, status: status.data };
-  } catch (error) {
-    oneBotError = error.message;
-  }
+  const homeStatus = homeAssistant.readiness();
+  const qqStatus = oneBot.loginStatus();
+  const engineStatus = typeof agent.refreshEngineStatus === "function"
+    ? await agent.refreshEngineStatus().catch(() => agent.engineStatus())
+    : {
+        engine: "workbuddy",
+        engineReady: Boolean(agent.child && agent.child.exitCode == null),
+        cliPath: null,
+        sdkVersion: null,
+        account: null
+      };
   const threadLocks = threadReservations.snapshot();
   const threadLocksOk = Object.values(threadLocks).every((lock) => ["locked", "unbound"].includes(lock.status));
+  const oneBotStatus = await qqStatus;
+  if (oneBotStatus.ok && !metadataSyncedOnce) {
+    refreshGroupMetadata().catch(() => {});
+  }
   return {
-    ok: !oneBotError && threadLocksOk,
+    ok: oneBotStatus.ok && threadLocksOk,
     hub: { host: hubHost, port: hubPort, authDisabled },
-    oneBot: { ok: !oneBotError, ...oneBotStatus, error: oneBotError },
-    codex: {
+    lanPanel: lanControl.status(),
+    homeAssistant: await homeStatus,
+    oneBot: oneBotStatus,
+    engine: {
+      engine: "workbuddy",
+      engineReady: Boolean(engineStatus.engineReady),
+      cliPath: engineStatus.cliPath || null,
+      sdkVersion: engineStatus.sdkVersion || null,
+      account: engineStatus.account || null,
       dispatchEnabled: agentDispatchStore.isEnabled(),
-      model: codexModel,
-      reasoningEffort: codexEffort,
-      autoCompactTokenLimit: codexAutoCompactTokenLimit,
-      autoCompactTokenScope: codexAutoCompactTokenScope,
-      activeTargets: codex.activeGroups(),
+      model: defaultModel,
+      reasoningEffort: defaultEffort,
+      autoCompactTokenLimit,
+      autoCompactTokenScope,
+      activeTargets: agent.activeGroups(),
       reservationsOk: threadLocksOk,
       threadLocks
     },
@@ -1465,6 +1782,8 @@ async function maintenanceState() {
       agentDispatch: agentDispatchStorePath,
       stickers: stickerStorePath,
       personaOwnerStyle: personaOwnerStylePath,
+      personaDir: personaStore.isImported ? join(dataDir, "persona") : dirname(personaCorePath),
+      personaImported: personaStore.isImported,
       mediaRoot,
       stickerLibrary: stickerLibraryDir
     }
@@ -1484,10 +1803,10 @@ function validateQqId(value, label) {
   return id;
 }
 
-function validateCodexConfig(value, { targetType = "group", currentConfig = null } = {}) {
+function validateAgentConfig(value, { targetType = "group", currentConfig = null } = {}) {
   const model = String(value?.model || "").trim();
-  const selectedModel = codexModels.find((item) => item.model === model);
-  if (!selectedModel) throw new HttpError(400, "请选择当前 Codex 账号可用的模型");
+  const selectedModel = availableModels.find((item) => item.model === model);
+  if (!selectedModel) throw new HttpError(400, "请选择当前 WorkBuddy 账号可用的模型");
   const reasoningEffort = String(value?.reasoningEffort || "").trim();
   if (!selectedModel.supportedReasoningEfforts.some((item) => item.reasoningEffort === reasoningEffort)) {
     throw new HttpError(400, "所选模型不支持这个思考强度");
@@ -1512,6 +1831,12 @@ function validateCodexConfig(value, { targetType = "group", currentConfig = null
   if (!homePermission || !homePermission.targetTypes.includes(targetType)) {
     throw new HttpError(400, "请选择可用的智能家居权限；私聊不能开放全群权限");
   }
+  const groupEssenceEnabled = targetType === "group"
+    ? Boolean(value?.groupEssenceEnabled ?? currentConfig?.groupEssenceEnabled ?? false)
+    : false;
+  const groupMuteEnabled = targetType === "group"
+    ? Boolean(value?.groupMuteEnabled ?? currentConfig?.groupMuteEnabled ?? false)
+    : false;
   const previousGreetings = normalizeSpeakerGreetings(currentConfig?.speakerGreetings);
   let speakerGreetings = previousGreetings;
   if (value?.speakerGreetings !== undefined) {
@@ -1523,9 +1848,12 @@ function validateCodexConfig(value, { targetType = "group", currentConfig = null
     throw new HttpError(400, "请先开启当前会话的智能家居与小爱发言权限");
   }
   if (enablingGreeting && !speakerGreetingsAvailable) {
-    throw new HttpError(400, "请先配置可用的小爱发言实体和 HA 凭证，再开启定时问候");
+    throw new HttpError(400, "请先连接 Home Assistant，再开启定时播报");
   }
-  return { model, reasoningEffort, contextTokenLimit, workingMode, permissionMode, calendarRemindersEnabled, homeAssistantPermission, speakerGreetings };
+  return {
+    model, reasoningEffort, contextTokenLimit, workingMode, permissionMode,
+    calendarRemindersEnabled, homeAssistantPermission, groupEssenceEnabled, groupMuteEnabled, speakerGreetings
+  };
 }
 
 function normalizeWorkBuddyContextLimit(value) {
@@ -1537,10 +1865,10 @@ function normalizeWorkBuddyContextLimit(value) {
 
 async function migrateWorkBuddyConversationConfigs(targetStore) {
   for (const conversation of targetStore.listGroups()) {
-    const current = conversation.codexConfig || defaultCodexConfig;
+    const current = conversation.agentConfig || defaultAgentConfig;
     const normalizedLimit = normalizeWorkBuddyContextLimit(current.contextTokenLimit);
     if (normalizedLimit === current.contextTokenLimit && current.workingMode === "agent" && current.permissionMode) continue;
-    await targetStore.setCodexConfig(conversation.groupId, {
+    await targetStore.setAgentConfig(conversation.groupId, {
       ...current,
       contextTokenLimit: normalizedLimit,
       workingMode: "agent",
@@ -1560,23 +1888,23 @@ function reservationTargets() {
 
 function reservationTarget(targetType, conversation) {
   const shared = sharedContexts.contextFor(targetType, conversation.groupId);
-  const config = shared?.group.codexConfig || conversation.codexConfig || defaultCodexConfig;
+  const config = shared?.group.agentConfig || conversation.agentConfig || defaultAgentConfig;
   return {
     targetType,
     targetId: conversation.groupId,
     threadId: shared ? shared.group.threadId : conversation.threadId,
-    model: config.model || codexModel,
-    effort: config.reasoningEffort || codexEffort,
-    contextTokenLimit: config.contextTokenLimit || codexAutoCompactTokenLimit || 200_000,
+    model: config.model || defaultModel,
+    effort: config.reasoningEffort || defaultEffort,
+    contextTokenLimit: config.contextTokenLimit || autoCompactTokenLimit || 200_000,
     workingMode: "agent",
     cwd: shared ? shared.cwd : targetType === "group"
       ? join(groupWorkspaceRoot, String(conversation.groupId))
-      : projectDir
+      : join(privateWorkspaceRoot, String(conversation.groupId))
   };
 }
 
-async function refreshCodexModels() {
-  const listed = await codex.listModels();
+async function refreshAvailableModels() {
+  const listed = await agent.listModels();
   const normalized = listed
     .filter((item) => !item.hidden && (item.model || item.id))
     .map((item) => ({
@@ -1592,13 +1920,11 @@ async function refreshCodexModels() {
       })).filter((effort) => effort.reasoningEffort)
     }))
     .filter((item) => item.supportedReasoningEfforts.length);
-  if (!normalized.some((item) => item.model === codexModel)) {
-    const fallback = engineKind === "workbuddy"
-      ? fallbackWorkBuddyModels(codexModel, codexEffort)
-      : fallbackCodexModels(codexModel, codexEffort);
-    normalized.push(...fallback.filter((item) => item.model === codexModel));
+  if (!normalized.some((item) => item.model === defaultModel)) {
+    const fallback = fallbackWorkBuddyModels(defaultModel, defaultEffort);
+    normalized.push(...fallback.filter((item) => item.model === defaultModel));
   }
-  if (normalized.length) codexModels = normalized;
+  if (normalized.length) availableModels = normalized;
   await ensureStickerLabelModelAvailable();
   broadcast({ type: "model-catalog", state: publicState() });
 }
@@ -1614,32 +1940,11 @@ function stickerLabelingState() {
 
 async function ensureStickerLabelModelAvailable() {
   const current = stickerLabelSettingsStore.snapshot().model;
-  if (codexModels.some((item) => item.model === current)) return;
-  const fallback = codexModels.find((item) => item.model === "hy3")?.model
-    || codexModels.find((item) => item.isDefault)?.model
-    || codexModels[0]?.model;
+  if (availableModels.some((item) => item.model === current)) return;
+  const fallback = availableModels.find((item) => item.model === "hy3")?.model
+    || availableModels.find((item) => item.isDefault)?.model
+    || availableModels[0]?.model;
   if (fallback) await stickerLabelSettingsStore.setModel(fallback);
-}
-
-function fallbackCodexModels(currentModel, currentEffort) {
-  const entries = [
-    ["gpt-6-astra", "GPT-6 Astra", ["low", "medium", "high", "xhigh", "max", "ultra"]],
-    ["gpt-5.6-sol", "GPT-5.6 Sol", ["low", "medium", "high", "xhigh", "max", "ultra"]],
-    ["gpt-5.6-terra", "GPT-5.6 Terra", ["low", "medium", "high", "xhigh", "max", "ultra"]],
-    ["gpt-5.6-luna", "GPT-5.6 Luna", ["low", "medium", "high", "xhigh", "max"]],
-    ["gpt-5.5", "GPT-5.5", ["low", "medium", "high", "xhigh"]]
-  ];
-  if (!entries.some(([model]) => model === currentModel)) entries.unshift([currentModel, currentModel, [currentEffort]]);
-  return entries.map(([model, displayName, efforts]) => ({
-    model,
-    displayName,
-    description: "",
-    isDefault: model === currentModel,
-    defaultReasoningEffort: model === currentModel ? currentEffort : "low",
-    supportedReasoningEfforts: [...new Set([...efforts, ...(model === currentModel ? [currentEffort] : [])])]
-      .filter(Boolean)
-      .map((reasoningEffort) => ({ reasoningEffort, description: "" }))
-  }));
 }
 
 function fallbackWorkBuddyModels(currentModel, currentEffort) {
@@ -1731,12 +2036,15 @@ function rememberMessage(messageId) {
 function isAuthorized(req, path, rawBody) {
   if (path === "/api/onebot/event") {
     const signature = String(req.headers["x-signature"] || "").trim();
-    if (signature && oneBotCallbackToken && rawBody) {
-      const expected = Buffer.from(`sha1=${createHmac("sha1", oneBotCallbackToken).update(rawBody).digest("hex")}`);
+    if (/^sha1=[0-9a-f]{40}$/u.test(signature) && rawBody) {
       const actual = Buffer.from(signature);
-      if (actual.length === expected.length && timingSafeEqual(actual, expected)) return true;
+      // SnowLuma signs callbacks with its OneBot access token. Also accept legacy Hub-signed callbacks.
+      if (oneBotCallbackTokens.some((token) => {
+        const expected = Buffer.from(`sha1=${createHmac("sha1", token).update(rawBody).digest("hex")}`);
+        return timingSafeEqual(actual, expected);
+      })) return true;
     }
-    return requestTokens(req).some((candidate) => candidate && [oneBotAccessToken, oneBotCallbackToken].includes(candidate));
+    return requestTokens(req).some((candidate) => oneBotCallbackTokens.includes(candidate));
   }
   if (!apiToken) return true;
   return requestTokens(req).includes(apiToken);
@@ -1745,7 +2053,7 @@ function isAuthorized(req, path, rawBody) {
 function requestTokens(req) {
   const authorization = String(req.headers.authorization || "");
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
-  const header = String(req.headers["x-codex-remote-token"] || "").trim();
+  const header = String(req.headers["x-gateway-token"] || "").trim();
   const query = requestUrl(req).searchParams.get("access_token") || "";
   return [bearer, header, query];
 }
@@ -1776,7 +2084,7 @@ function sendJson(res, status, body) {
 }
 
 function corsHeaders() {
-  return { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, x-codex-remote-token, x-signature", "access-control-allow-methods": "GET, POST, OPTIONS" };
+  return { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, x-gateway-token, x-signature", "access-control-allow-methods": "GET, POST, OPTIONS" };
 }
 
 function requestUrl(req) {
@@ -1808,6 +2116,15 @@ async function serveStatic(req, res, path) {
 
 function mimeType(path) {
   return ({ ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png" })[extname(path).toLowerCase()] || "application/octet-stream";
+}
+
+async function readPackageVersion(path) {
+  try {
+    const pkg = JSON.parse(await readFile(path, "utf8"));
+    return String(pkg?.version || "0.0.0");
+  } catch {
+    return "0.0.0";
+  }
 }
 
 async function loadSettings(path) {
@@ -1843,9 +2160,12 @@ async function shutdown() {
   stickerCuration.stop();
   threadReservations.stop();
   clearInterval(subscriptionTimer);
-  clearInterval(mediaCleanupTimer);
+  clearTimeout(bootHygieneTimer);
+  clearTimeout(bootQzoneTimer);
+  clearInterval(storageHygieneTimer);
   clearInterval(groupMetadataTimer);
-  await codex.close();
+  await lanControl.close();
+  await agent.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref?.();
 }
