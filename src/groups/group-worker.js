@@ -5,6 +5,7 @@ import {
   buildMcpTurnPrompt,
   buildTurnPrompt,
   constrainConversationSecurity,
+  getAgentName,
   parseOwnerControlCommand,
   requireAgentReply,
   sandboxForTrigger,
@@ -13,6 +14,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "../qq/file-directive.js";
 import { createLiveConversationTools } from "../qq/live-conversation.js";
+import { DEFAULT_HUMAN_PACING } from "../qq/human-pacing.js";
 import { sharedContextLabel } from "../qq/shared-context-reader.js";
 import { conversationReadSequence } from "./group-state.js";
 import { runConversationTurn } from "../qq/conversation-turn.js";
@@ -32,7 +34,8 @@ export class GroupWorker {
     store, agent, oneBot, mediaManager, fileManager, stickerManager = null, stickerLabeler = null, triggerManager,
     subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null,
     knownMemberIds = () => [], groupMemberDirectory = null, defaultCwd = null,
-    sharedWorkspaceRoot = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs
+    sharedWorkspaceRoot = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs,
+    humanPacing = false, pacingConfig = DEFAULT_HUMAN_PACING
   } = {}) {
     this.store = store;
     this.agent = agent;
@@ -54,6 +57,8 @@ export class GroupWorker {
     this.canRun = (id) => canRun(id) && this.store.snapshot(id).replyEnabled !== false;
     this.onEvent = onEvent;
     this.taskGate = taskGate;
+    this.humanPacing = Boolean(humanPacing);
+    this.pacingConfig = pacingConfig;
     this.qzone = null;
     this.running = new Map();
     this.qzoneReservations = new Map();
@@ -62,6 +67,7 @@ export class GroupWorker {
     this.olderChatPermits = new Set();
     this.live = new Map();
     this.followup = new ConversationFollowup({ store, targetType: "group", durationMs: followupDurationMs,
+      humanPacing: this.humanPacing, pacingConfig: this.pacingConfig, botNameResolver: () => getAgentName(),
       canRun: (id) => this.canRun(id), blocked: () => Boolean(this.taskGate?.blocked),
       shouldYield: (id) => this.qzoneReservations.has(String(id)) || this.sharedContexts?.shouldYield("group", id),
       setLive: (id, patch) => this.setLive(id, patch), onEvent });
@@ -576,6 +582,7 @@ export class GroupWorker {
       initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),
       pokeSenderId, allowedPokeUserIds, stickers: this.stickerManager?.promptCatalog() || [],
       readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
+      humanPacing: this.humanPacing, pacingConfig: this.pacingConfig,
       renderMessages: (messages, { first, activeMessages }) => [
         first ? sharedContextLabel(this.sharedContexts, "group", groupId) : "",
         buildTurnPrompt(messages, { trigger: work.trigger, security, stickerCatalog: [], includeResponseInstruction: false,

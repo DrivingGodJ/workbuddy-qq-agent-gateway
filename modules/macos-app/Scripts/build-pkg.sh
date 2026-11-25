@@ -9,7 +9,7 @@ APP_BUNDLE="$DIST_DIR/WorkBuddyQQGateway.app"
 PKG_PATH="$DIST_DIR/WorkBuddyQQGateway-Installer.pkg"
 SIGN_IDENTITY=""
 NOTARIZE_PROFILE=""
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -22,12 +22,12 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --version)
-      VERSION="${2:-0.3.0}"
+      VERSION="${2:-0.3.1}"
       shift 2
       ;;
     *)
       echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--sign-identity 'Developer ID Installer: ...'] [--notarize-profile <profile>] [--version 0.3.0]" >&2
+      echo "Usage: $0 [--sign-identity 'Developer ID Installer: ...'] [--notarize-profile <profile>] [--version 0.3.1]" >&2
       exit 1
       ;;
   esac

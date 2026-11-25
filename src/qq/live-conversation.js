@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { handleQqMcpTool } from "./mcp-actions.js";
 import { QQ_FACE_ALIASES } from "./file-directive.js";
 import { AGENT_QQ_ID, OWNER_QQ_ID, sanitizeGroupReply } from "../security/policy.js";
+import { formatShanghaiNow } from "../security/subscription-policy.js";
 import { QqMessageReader, MESSAGE_READER_TOOLS } from "./message-reader.js";
 import { readGroupManagement, manageGroup } from "./group-management.js";
 import { conversationReadSequence, unreadConversationMessages } from "../groups/group-state.js";
 import { homeAssistantRequest } from "../automation/home-assistant.js";
 import { isPokeEvent } from "../security/reply-reference.js";
 import { conversationAction } from "../automation/conversation-actions.js";
+import { DEFAULT_HUMAN_PACING, computeFollowupDurationMs, computeReplyDelayMs } from "./human-pacing.js";
 
 const PAGE_SIZE = 40;
 const MAX_WAIT_MS = 8000;
@@ -62,7 +64,8 @@ export function createLiveConversationTools({
   trigger, triggerMessages, security, initialImageSequence, renderMessages,
   pokeSenderId = null, allowedPokeUserIds = [], stickers = [], canRun = () => true,
   readOnlyContextMessages = [], messageReader = new QqMessageReader({ oneBot }), onEvent = () => {},
-  scheduledTask = false, qzoneActions = null, readSharedContext = null
+  scheduledTask = false, qzoneActions = null, readSharedContext = null,
+  humanPacing = false, pacingConfig = DEFAULT_HUMAN_PACING, pacingRandom = Math.random
 }) {
   const context = {
     liveMode: true,
@@ -92,6 +95,10 @@ export function createLiveConversationTools({
     lastReadSequence: scheduledTask ? 0 : Math.max(conversationReadSequence(store.snapshot(targetId)),
       Number(store.snapshot(targetId).liveSession?.lastReadSequence || 0)),
     actionCount: 0,
+    triggerReason: trigger?.reason || "mention",
+    chatSendCount: 0,
+    lastSentText: "",
+    lastReadMessages: [],
     managementActionCount: (store.snapshot(targetId).liveSession?.actions || [])
       .filter((item) => item.kind === "group_management").length,
     qzoneActionCount: (store.snapshot(targetId).liveSession?.actions || [])
@@ -135,9 +142,28 @@ export function createLiveConversationTools({
         authorize();
         if (!context.readCalled && !scheduledTask) throw new Error("请先读取当前会话消息。");
         if (name === "read_calendar_reminders") {
+          const scope = args.scope == null ? "both" : String(args.scope).trim();
+          if (!["both", "calendar", "reminders"].includes(scope)) throw new Error("scope 须为 both、calendar 或 reminders。");
           if (!Number.isInteger(args.horizon_days ?? 30) || (args.horizon_days ?? 30) < 1 || (args.horizon_days ?? 30) > 60
             || !Number.isInteger(args.limit ?? 20) || (args.limit ?? 20) < 1 || (args.limit ?? 20) > 80) throw new Error("查询范围须为 1–60 天，条数须为 1–80。");
-          const result = await automationClient.getContext({ horizonDays: args.horizon_days ?? 30, limit: args.limit ?? 20 });
+          for (const [key, max] of [["start_date", 40], ["end_date", 40], ["calendar_name", 60], ["query", 80]]) {
+            if (args[key] != null && (typeof args[key] !== "string" || args[key].trim().length > max)) {
+              throw new Error(`${key} 参数无效或过长。`);
+            }
+          }
+          if (args.include_completed != null && typeof args.include_completed !== "boolean") {
+            throw new Error("include_completed 须为布尔值。");
+          }
+          const result = await automationClient.getContext({
+            horizonDays: args.horizon_days ?? 30,
+            limit: args.limit ?? 20,
+            ...(args.scope != null ? { scope } : {}),
+            ...(args.start_date ? { startDate: args.start_date.trim() } : {}),
+            ...(args.end_date ? { endDate: args.end_date.trim() } : {}),
+            ...(args.calendar_name ? { calendarName: args.calendar_name.trim() } : {}),
+            ...(args.query ? { query: args.query.trim() } : {}),
+            ...(args.include_completed === true ? { includeCompleted: true } : {})
+          });
           authorize();
           return answer(JSON.stringify(result));
         }
@@ -244,16 +270,33 @@ export function createLiveConversationTools({
     }
     if (name === "end_conversation") {
       if (!scheduledTask && !context.readCalled) return answer("请先调用 read_messages 读取当前消息，再决定结束。", true);
-      if (!scheduledTask && !context.ended) await store.armReplyFollowup(targetId, {
-        afterSequence: context.lastReadSequence,
-        deferredImageAfterSequence: context.deferredNewMedia ? context.lastReadSequence : null
-      });
+      let followupDuration;
+      if (!scheduledTask && !context.ended) {
+        followupDuration = humanPacing
+          ? computeFollowupDurationMs({
+              targetType,
+              triggerReason: context.triggerReason,
+              chatSendCount: context.chatSendCount,
+              totalActionCount: context.actionCount,
+              lastSentText: context.lastSentText,
+              readMessages: context.lastReadMessages,
+              config: pacingConfig
+            })
+          : undefined;
+        await store.armReplyFollowup(targetId, {
+          afterSequence: context.lastReadSequence,
+          deferredImageAfterSequence: context.deferredNewMedia ? context.lastReadSequence : null,
+          ...(followupDuration !== undefined ? { durationMs: followupDuration } : {})
+        });
+      }
       context.ended = true;
       return answer(scheduledTask
         ? "本次定时模型轮次已结束；读取过的聊天消息仍留在原来的待处理队列，后续任务继续按顺序执行。"
         : store.snapshot(targetId).pendingMessages.some((message) => !message.readAt && !message.isSelf)
-          ? "本轮结束；已有未读消息已排入续接队列，当前模型轮次结束后按队列立即处理，不等待新消息或两分钟倒计时。请直接结束模型轮次，不再输出发送正文。"
-          : "本轮结束；网关观察两分钟，有新消息会重新唤醒你自行判断是否回复，安静两分钟才退出。请直接结束模型轮次，不再输出发送正文。");
+          ? "本轮结束；已有未读消息已排入续接队列，当前模型轮次结束后按队列立即处理，不等待新消息或续接倒计时。请直接结束模型轮次，不再输出发送正文。"
+          : followupDuration === 0
+            ? "本轮已自然结束，不再继续保持续接观察窗口。请直接结束模型轮次，不再输出发送正文。"
+            : "本轮结束；网关将动态观察后续接话（有新消息会立即唤醒），安静超时后退出。请直接结束模型轮次，不再输出发送正文。");
     }
     if (name === "read_messages" || name === "wait_for_messages") {
       const activeWait = name === "wait_for_messages";
@@ -293,6 +336,8 @@ export function createLiveConversationTools({
       messageReader.capture(readable.filter((message) => !message.isSelf));
       if (first) messageReader.capture(readOnlyContextMessages);
       if (readable.length) {
+        const incoming = readable.filter((message) => !message.isSelf);
+        if (incoming.length) context.lastReadMessages = [...context.lastReadMessages, ...incoming].slice(-8);
         await store.markMessagesRead?.(targetId, readable);
         try { onEvent({ type: "messages-read", targetType, targetId, at: new Date().toISOString() }); } catch { /* acknowledgement is already durable */ }
         context.lastReadSequence = Math.max(context.lastReadSequence,
@@ -305,7 +350,9 @@ export function createLiveConversationTools({
       }
       context.readCalled = true;
       const notes = [];
-      if (first) notes.push(`【当前会话日历/待办权限】${store.snapshot(targetId).agentConfig?.calendarRemindersEnabled === false ? "已关闭" : "已开启，可按需调用 read_calendar_reminders、add_calendar_reminder"}`);
+      if (first) notes.push(store.snapshot(targetId).agentConfig?.calendarRemindersEnabled === false
+        ? "【当前会话日历/待办权限】已关闭"
+        : `【当前会话日历/待办权限】已开启（当前北京时间：${formatShanghaiNow()}）。普通聊天轮次中如需查询日程/待办，或要记录明确安排、截止任务、转发通知里的活动/待办，请直接调用 read_calendar_reminders / add_calendar_reminder（时间用带 +08:00 的 ISO），不要只口头答应而漏调写入工具；写入成功后简短告知结果。`);
       if (first && targetType === "group") {
         const cfg = store.snapshot(targetId).agentConfig || {};
         const groupAdminLines = [];
@@ -461,6 +508,28 @@ export function createLiveConversationTools({
     if (validated.isError || !queued.length) return validated;
     const action = queued[0];
     try {
+      if (humanPacing && context.chatSendCount > 0 && ["message", "face", "sticker", "poke", "image", "file"].includes(action.kind)) {
+        const rawText = action.kind === "message"
+          ? (action.text || (action.segments || []).map((item) => item.text || "").join(""))
+          : "";
+        const delayMs = computeReplyDelayMs({ kind: action.kind, text: rawText }, { random: pacingRandom, config: pacingConfig });
+        if (delayMs > 0) {
+          const hasInterruption = () => !scheduledTask && unreadConversationMessages(store.snapshot(targetId))
+            .some((message) => !message.isSelf && Number(message.sequence) > context.lastReadSequence);
+          if (!hasInterruption()) {
+            if (store.waitForNewMessages) {
+              await store.waitForNewMessages(targetId, {
+                afterSequence: context.lastReadSequence,
+                timeoutMs: delayMs,
+                shouldStop: () => active?.cancelRequested || !canRun()
+                  || store.snapshot(targetId).replyEnabled === false || hasInterruption()
+              });
+            } else {
+              await pause(delayMs);
+            }
+          }
+        }
+      }
       if (active?.cancelRequested || !canRun()) return answer("本轮已停止或回复开关已关闭。", true);
       store.assertReplyEnabled(targetId);
       let summary = "";
@@ -544,10 +613,18 @@ export function createLiveConversationTools({
       if (scheduledTask) await store.recordStandaloneActionSent(targetId, receipt);
       else await store.recordLiveActionSent(targetId, { ...receipt, observedSequence: context.lastReadSequence });
       context.actionCount += 1;
+      if (["message", "face", "sticker", "poke", "image"].includes(action.kind)) {
+        context.chatSendCount += 1;
+        if (action.kind === "message") context.lastSentText = summary;
+      }
       context.displayedActions.push(summary);
       try { active.onDelta?.(summary, context.displayedActions.join("\n\n")); } catch { /* QQ delivery already succeeded. */ }
       const sentId = sent.body?.data?.message_id ?? sent.body?.data?.messageId;
-      return answer(`${summary} 已成功交给 QQ${sentId == null ? "" : `，消息 ID：${sentId}`}。可以继续读取或回复；结束时调用 end_conversation。`);
+      const interruptedHint = !scheduledTask && unreadConversationMessages(store.snapshot(targetId))
+        .some((message) => !message.isSelf && Number(message.sequence) > context.lastReadSequence)
+        ? " 注意：发送期间对方又发来新消息，继续回复前请先调用 read_messages 查看，避免答非所问。"
+        : "";
+      return answer(`${summary} 已成功交给 QQ${sentId == null ? "" : `，消息 ID：${sentId}`}。可以继续读取或回复；结束时调用 end_conversation。${interruptedHint}`);
     } catch (error) {
       context.failed = true;
       return answer(`本轮动作未能确认：${error.message}。请结束本轮，不要立即重试；待处理消息保持不变。`, true);

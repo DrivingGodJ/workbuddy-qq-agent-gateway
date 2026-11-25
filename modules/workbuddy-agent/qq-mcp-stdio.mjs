@@ -11,22 +11,28 @@ if (!threadId || !secret || !/^http:\/\/127\.0\.0\.1:\d+\/call$/u.test(endpoint)
 const allTools = [
   {
     name: "read_calendar_reminders",
-    description: "按需查询日历与未完成待办。当前会话开启日历自动化后，每轮普通聊天均可调用，不限通知轮次；关闭即拒绝。查询结果含私人信息，只用于当前获准会话，不向其他渠道转发。",
+    description: "按需精准查询本机日历与待办（EventKit）。平时不会预读取，只有需要查日程/待办或核对时间冲突时才调用。支持用 scope 只查 calendar 或 reminders，并可用 start_date / end_date / calendar_name / query 缩小范围，不必每次全量拉取。若返回 warnings 提示缺权限则如实转告用户。",
     inputSchema: { type: "object", properties: {
+      scope: { type: "string", enum: ["both", "calendar", "reminders"], default: "both", description: "仅查日历填 calendar，仅查待办填 reminders，都要填 both" },
+      start_date: { type: "string", description: "可选：起始日期或时间（如 2026-11-26 或带 +08:00 的 ISO），不填默认当前时间" },
+      end_date: { type: "string", description: "可选：结束日期或时间（如 2026-11-26 或带 +08:00 的 ISO），不填按 horizon_days 计算" },
+      calendar_name: { type: "string", description: "可选：限定日历或待办列表名称（如 学习、社团、活动、待办）" },
+      query: { type: "string", description: "可选：按标题/地点/备注关键词过滤" },
+      include_completed: { type: "boolean", default: false, description: "是否包含已完成待办，默认 false" },
       horizon_days: { type: "integer", minimum: 1, maximum: 60, default: 30 },
       limit: { type: "integer", minimum: 1, maximum: 80, default: 20 }
     }, additionalProperties: false }
   },
   {
     name: "add_calendar_reminder",
-    description: "当前会话日历自动化开启时，每轮均可按当前对话意图写入日历或待办，不限通知。占用时间的事项进学习/社团/活动日历；需要完成的事进待办列表并加旗标。时间用带时区 ISO，不猜缺失信息。成功后用 send_message 告知；失败或状态不明不自动重试。",
+    description: "当前会话日历自动化开启时，每轮普通聊天只要用户要求记录、或对话/转发通知中出现值得落地的明确日程与待办，就必须直接调用本工具写入，不要只口头答应。占用固定时间的安排用 type=\"calendar\"（calendarName 选 学习/社团/活动，start 必填带 +08:00 的 ISO 时间）；需完成/提交/携带/提醒的事项用 type=\"reminder\"（写入“待办”列表，due 填带 +08:00 的 ISO 或 null）。成功后用 send_message 简短告知；失败不盲目重试。",
     inputSchema: { type: "object", properties: {
       type: { type: "string", enum: ["calendar", "reminder"] },
       title: { type: "string", minLength: 1, maxLength: 300 },
       calendarName: { type: "string", enum: ["学习", "社团", "活动"] },
-      start: { type: "string", description: "calendar 必填，带时区 ISO" },
+      start: { type: "string", description: "calendar 必填，带时区 ISO（例如 2026-11-27T10:00:00+08:00）" },
       end: { type: ["string", "null"] }, allDay: { type: "boolean" },
-      due: { type: ["string", "null"], description: "待办截止时间，不明确时 null" },
+      due: { type: ["string", "null"], description: "待办截止时间（带时区 ISO），无明确截止填 null" },
       location: { type: "string", maxLength: 500 }, notes: { type: "string", maxLength: 2000 }
     }, required: ["type", "title"], additionalProperties: false }
   },
@@ -262,7 +268,7 @@ for await (const line of lines) {
         body: JSON.stringify({ threadId, name: request.params?.name, arguments: request.params?.arguments || {} }),
         signal: AbortSignal.timeout(request.params?.name === "wait_for_messages"
           ? Math.min(126_000, Number(request.params?.arguments?.seconds || 0) * 1000 + 6000)
-          : ["read_calendar_reminders", "add_calendar_reminder"].includes(request.params?.name) ? 185_000 : 15_000)
+          : ["read_calendar_reminders", "add_calendar_reminder"].includes(request.params?.name) ? 30_000 : 15_000)
       });
       if (!response.ok) throw new Error(`QQ gateway rejected MCP call: HTTP ${response.status}`);
       result = await response.json();

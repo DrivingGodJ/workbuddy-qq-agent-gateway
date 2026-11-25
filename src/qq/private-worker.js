@@ -4,6 +4,7 @@ import {
   baseThreadInstructions,
   buildMcpTurnPrompt,
   constrainConversationSecurity,
+  getAgentName,
   parseOwnerControlCommand,
   requireAgentReply,
   sanitizeGroupReply,
@@ -11,6 +12,7 @@ import {
 } from "../security/policy.js";
 import { parseQqDeliveryDirectives } from "./file-directive.js";
 import { createLiveConversationTools } from "./live-conversation.js";
+import { DEFAULT_HUMAN_PACING } from "./human-pacing.js";
 import { sharedContextLabel } from "./shared-context-reader.js";
 import { conversationReadSequence } from "../groups/group-state.js";
 import { runConversationTurn } from "./conversation-turn.js";
@@ -28,7 +30,7 @@ import {
 } from "../security/subscription-policy.js";
 
 export class PrivateWorker {
-  constructor({ store, agent, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null, workspaceRoot = null, defaultCwd = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs } = {}) {
+  constructor({ store, agent, oneBot, mediaManager, fileManager = null, stickerManager = null, stickerLabeler = null, triggerManager, subscriptionStore = null, automationClient = null, homeAssistant = null, persona = null, targetNameResolver = () => null, workspaceRoot = null, defaultCwd = null, taskGate = null, canRun = () => true, onEvent = () => {}, followupDurationMs, humanPacing = false, pacingConfig = DEFAULT_HUMAN_PACING } = {}) {
     this.store = store;
     this.agent = agent;
     this.oneBot = oneBot;
@@ -47,6 +49,8 @@ export class PrivateWorker {
     this.canRun = (id) => canRun(id) && this.store.snapshot(id).replyEnabled !== false;
     this.onEvent = onEvent;
     this.taskGate = taskGate;
+    this.humanPacing = Boolean(humanPacing);
+    this.pacingConfig = pacingConfig;
     this.qzone = null;
     this.running = new Map();
     this.qzoneReservations = new Map();
@@ -55,6 +59,7 @@ export class PrivateWorker {
     this.olderChatPermits = new Set();
     this.live = new Map();
     this.followup = new ConversationFollowup({ store, targetType: "private", durationMs: followupDurationMs,
+      humanPacing: this.humanPacing, pacingConfig: this.pacingConfig, botNameResolver: () => getAgentName(),
       canRun: (id) => this.canRun(id), blocked: () => Boolean(this.taskGate?.blocked),
       shouldYield: (id) => this.qzoneReservations.has(String(id)) || this.sharedContexts?.shouldYield("private", id),
       setLive: (id, patch) => this.setLive(id, patch), onEvent });
@@ -503,6 +508,7 @@ export class PrivateWorker {
         initialImageSequence: Number(work.messages.at(-1)?.sequence || 0),
         stickers: this.stickerManager?.promptCatalog() || [],
         readOnlyContextMessages: inputContexts.flatMap((context) => context.messages || []),
+        humanPacing: this.humanPacing, pacingConfig: this.pacingConfig,
         renderMessages: (messages, { first, activeMessages }) => [
           first ? sharedContextLabel(this.sharedContexts, "private", userId) : "",
           buildPrivateTurnPrompt(messages, first ? contexts : [], {

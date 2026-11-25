@@ -297,10 +297,14 @@ export class SessionStore {
     if (afterSequence != null && MESSAGE_WAKE_REASONS.has(group.pendingTrigger?.reason)
       && group.pendingTrigger.sequence != null
       && Number(group.pendingTrigger.sequence) <= Number(afterSequence)) group.pendingTrigger = null;
-    group.replyFollowup = {
-      startedAt: now.toISOString(), expiresAt: new Date(now.getTime() + Math.max(0, Math.min(REPLY_FOLLOWUP_MS, durationMs))).toISOString(),
-      afterSequence: afterSequence == null ? this.state.nextSequence - 1 : Number(afterSequence)
-    };
+    const effectiveDurationMs = Math.max(0, Math.min(REPLY_FOLLOWUP_MS, Number(durationMs) || 0));
+    group.replyFollowup = effectiveDurationMs > 0
+      ? {
+          startedAt: now.toISOString(),
+          expiresAt: new Date(now.getTime() + effectiveDurationMs).toISOString(),
+          afterSequence: afterSequence == null ? this.state.nextSequence - 1 : Number(afterSequence)
+        }
+      : null;
     // Program-controlled completion also catches messages received while the
     // model was finishing, even when they did not @ the bot.
     const unread = afterSequence == null ? null : group.pendingMessages.find((message) =>

@@ -31,7 +31,7 @@ import { parseSpeakerWeatherLocation } from "./qq/speaker-greeting-weather.js";
 import { normalizeOneBotGroupMessage, normalizeOneBotGroupPoke, normalizeOneBotPrivateMessage, formatLocalTime, renderOneBotMessageText } from "./qq/message-normalizer.js";
 import { OneBotClient } from "./qq/onebot-client.js";
 import { PrivateWorker } from "./qq/private-worker.js";
-import { AGENT_QQ_ID, OWNER_QQ_ID, parseOwnerControlCommand } from "./security/policy.js";
+import { AGENT_QQ_ID, OWNER_QQ_ID, getAgentName, parseOwnerControlCommand } from "./security/policy.js";
 import { SessionStore } from "./storage/session-store.js";
 import { MetadataCache } from "./storage/metadata-cache.js";
 import { AgentDispatchStore } from "./storage/agent-dispatch-store.js";
@@ -313,8 +313,22 @@ const recentEvents = [];
 const removingTargets = new Set();
 const contextLinkChanges = new Set();
 const targetUpdateStream = new TargetUpdateStream({ emit: publishTargetUpdate });
-const triggerManager = new TriggerManager({ store, allowedGroups, periodicMinutes: periodicTriggerMinutes });
-const privateTriggerManager = new TriggerManager({ store: privateStore, allowedGroups: null });
+const humanPacing = process.env.WORKBUDDY_QQ_HUMAN_PACING !== "0";
+const triggerManager = new TriggerManager({
+  store,
+  allowedGroups,
+  periodicMinutes: periodicTriggerMinutes,
+  targetType: "group",
+  humanPacing,
+  botNameResolver: () => getAgentName()
+});
+const privateTriggerManager = new TriggerManager({
+  store: privateStore,
+  allowedGroups: null,
+  targetType: "private",
+  humanPacing,
+  botNameResolver: () => getAgentName()
+});
 const taskGate = new AgentTaskGate();
 let sharedContextsReady = false;
 const sharedContexts = new SharedContexts({
@@ -348,6 +362,7 @@ const worker = new GroupWorker({
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && allowedGroups.includes(String(id)) && !removingTargets.has(`group:${id}`)
     && !contextLinkChanges.has(`group:${id}`) && !sharedContexts.isCancelled("group", id),
+  humanPacing,
   onEvent: recordEvent
 });
 const privateWorker = new PrivateWorker({
@@ -359,6 +374,7 @@ const privateWorker = new PrivateWorker({
   taskGate,
   canRun: (id) => agentDispatchStore.isEnabled() && !targetAllowlist.isRemoved("private", id) && !removingTargets.has(`private:${id}`)
     && !contextLinkChanges.has(`private:${id}`) && !sharedContexts.isCancelled("private", id),
+  humanPacing,
   onEvent: recordEvent
 });
 for (const targetWorker of [worker, privateWorker]) {
