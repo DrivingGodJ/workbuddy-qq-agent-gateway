@@ -23,7 +23,7 @@ Switch between groups, DMs, and notification sources in the sidebar. Follow inco
 ## Install
 
 1. Download the Apple Silicon `arm64.pkg` installer from [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest).
-2. Open **WorkBuddy QQ Gateway** from Applications. Follow the assistant to prepare the runtime and sign in to WorkBuddy and the bot’s QQ account.
+2. Open **WorkBuddy QQ Gateway** from Applications. Follow the assistant to prepare the runtime (including built-in SnowLuma mirror pull with automatic fallback) and sign in to WorkBuddy and the bot’s QQ account.
 3. Add the groups or DMs you want to connect, and set the model and tool permissions for each conversation.
 
 The assistant can detect and take over an existing deployment. The app supports starting at login, a quiet GitHub update check at launch, and persona import and export. See the [setup and deployment guide](docs/GUIDE.en.md) for installation and migration details.

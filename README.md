@@ -23,7 +23,7 @@
 ## 安装
 
 1. 在 [GitHub Releases](https://github.com/DrivingGodJ/workbuddy-qq-agent-gateway/releases/latest) 下载 Apple Silicon 的 `arm64.pkg` 安装包。
-2. 安装后从「应用程序」打开 **WorkBuddy QQ Gateway**，按向导准备运行环境，登录 WorkBuddy 和机器人 QQ 账号。
+2. 安装后从「应用程序」打开 **WorkBuddy QQ Gateway**，按向导准备运行环境（支持内置 SnowLuma 国内/官方镜像源一键拉取并自动回退），登录 WorkBuddy 和机器人 QQ 账号。
 3. 添加要接入的群聊或私聊，按会话配置模型与工具权限。
 
 已有部署可通过向导检测并接管。应用支持登录后自启、启动时静默检查 GitHub 新版本，以及导入和导出人格。安装和迁移细节见 [使用与部署指南](docs/GUIDE.zh-CN.md)。

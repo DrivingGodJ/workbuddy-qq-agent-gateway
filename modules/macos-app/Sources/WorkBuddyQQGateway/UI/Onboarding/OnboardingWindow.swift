@@ -490,7 +490,7 @@ struct OnboardingWindow: View {
             Text("Step 4 · 初始化 QQ 虚拟机与 SnowLuma 容器")
                 .font(.headline)
 
-            stepCard(number: "1", title: "选择 SnowLuma 镜像来源", subtitle: "支持本机已有镜像、离线 .tar.gz 镜像包，或本地/NAS 工程目录构建") {
+            stepCard(number: "1", title: "选择 SnowLuma 镜像来源", subtitle: "推荐直接从内置镜像源在线下载，也支持本机已有镜像、离线 .tar.gz 镜像包或本地/NAS 工程目录构建") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("镜像来源", selection: Bindable(wizard).imageSourceMode) {
                         ForEach(SnowlumaImageSourceMode.allCases) { mode in
@@ -501,6 +501,39 @@ struct OnboardingWindow: View {
                     .disabled(wizard.isBusy)
 
                     switch wizard.imageSourceMode {
+                    case .remoteRegistryPull:
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("镜像源", selection: Bindable(wizard).selectedMirrorPreset) {
+                                ForEach(SnowlumaMirrorPreset.allCases) { preset in
+                                    Text(preset.rawValue).tag(preset)
+                                }
+                            }
+                            .disabled(wizard.isBusy)
+
+                            if wizard.selectedMirrorPreset == .custom {
+                                TextField("镜像地址（如 ghcr.nju.edu.cn/zhx57/snowluma:latest）", text: Bindable(wizard).customRemoteImageRef)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(wizard.isBusy)
+                            }
+
+                            let candidates = OnboardingOrchestrator.resolveRemoteImageCandidates(
+                                preset: wizard.selectedMirrorPreset,
+                                customImageReference: wizard.customRemoteImageRef
+                            )
+                            Text(
+                                candidates.count > 1
+                                    ? "拉取顺序：\(candidates.joined(separator: " → "))"
+                                    : "目标镜像：\(candidates.first ?? "请输入有效镜像地址")"
+                            )
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+
+                            Text("来源为第三方开源社区镜像（zhx57/SnowLuma，原生 linux/arm64）；首次拉取约需 1–5 分钟，若国内源不可用将自动回退官方源。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                     case .existingLocalImage:
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {

@@ -309,6 +309,8 @@ struct GatewayCoreTests {
         #expect(orchestrator.containerReady == true)
 
         await orchestrator.setupPythonSDKVenv()
+        orchestrator.imageSourceMode = .existingLocalImage
+        await orchestrator.initializeColimaAndSnowluma()
         orchestrator.imageSourceMode = .offlineArchiveTar
         await orchestrator.initializeColimaAndSnowluma()
         orchestrator.imageSourceMode = .localProjectFolder
@@ -317,6 +319,84 @@ struct GatewayCoreTests {
         #expect(orchestrator.isBusy == false)
         #expect(orchestrator.activeTaskKey == nil)
         #expect(orchestrator.activeTaskStatus == nil)
+    }
+
+    @Test("OnboardingOrchestrator resolves SnowLuma mirror presets and falls back on pull failure")
+    @MainActor
+    func snowlumaMirrorPresetsAndFallback() async throws {
+        #expect(
+            OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .autoFallback, customImageReference: "")
+                == [SnowlumaMirrorPreset.njuImageRef, SnowlumaMirrorPreset.officialImageRef]
+        )
+        #expect(
+            OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .njuMirror, customImageReference: "")
+                == [SnowlumaMirrorPreset.njuImageRef]
+        )
+        #expect(
+            OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .ghcrOfficial, customImageReference: "")
+                == [SnowlumaMirrorPreset.officialImageRef]
+        )
+        #expect(
+            OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .custom, customImageReference: "  ghcr.io/example/snowluma:v1  ")
+                == ["ghcr.io/example/snowluma:v1"]
+        )
+        #expect(OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .custom, customImageReference: "   ").isEmpty)
+        #expect(OnboardingOrchestrator.resolveRemoteImageCandidates(preset: .custom, customImageReference: "ghcr.io/bad image:latest").isEmpty)
+
+        actor MockPullRunner: CommandRunning {
+            var recordedCalls: [[String]] = []
+            private let failAll: Bool
+
+            init(failAll: Bool = false) {
+                self.failAll = failAll
+            }
+
+            func run(
+                executable: String,
+                arguments: [String],
+                currentDirectory: URL?,
+                extraEnv: [String: String],
+                timeoutSeconds: TimeInterval?
+            ) async throws -> CommandResult {
+                recordedCalls.append(arguments)
+                let callIndex = recordedCalls.count
+
+                if failAll || callIndex == 1 {
+                    return CommandResult(exitCode: 1, stdout: "", stderr: "timeout connecting mirror \(callIndex)")
+                }
+                return CommandResult(exitCode: 0, stdout: "Status: Downloaded newer image", stderr: "")
+            }
+        }
+
+        let runner = MockPullRunner()
+        let orchestrator = OnboardingOrchestrator(dryRun: false, runner: runner)
+        let pulled = try await orchestrator.pullSnowlumaImage(
+            dockerExecutable: "/usr/bin/docker",
+            dockerContext: "colima-snowluma",
+            candidates: SnowlumaMirrorPreset.builtinImageCandidates
+        )
+        let calls = await runner.recordedCalls
+        #expect(pulled == SnowlumaMirrorPreset.officialImageRef)
+        #expect(calls.count == 2)
+        #expect(calls[0] == ["--context", "colima-snowluma", "pull", "--platform", "linux/arm64", SnowlumaMirrorPreset.njuImageRef])
+        #expect(calls[1] == ["--context", "colima-snowluma", "pull", "--platform", "linux/arm64", SnowlumaMirrorPreset.officialImageRef])
+        #expect(orchestrator.commandLogs.contains { $0.contains("自动回退到下一个备用源") })
+
+        let failingRunner = MockPullRunner(failAll: true)
+        let failingOrchestrator = OnboardingOrchestrator(dryRun: false, runner: failingRunner)
+        var capturedMessage = ""
+        do {
+            _ = try await failingOrchestrator.pullSnowlumaImage(
+                dockerExecutable: "/usr/bin/docker",
+                dockerContext: "colima-snowluma",
+                candidates: SnowlumaMirrorPreset.builtinImageCandidates
+            )
+            Issue.record("Expected pullSnowlumaImage to throw when all mirrors fail")
+        } catch {
+            capturedMessage = error.localizedDescription
+        }
+        #expect(capturedMessage.contains(SnowlumaMirrorPreset.njuImageRef))
+        #expect(capturedMessage.contains(SnowlumaMirrorPreset.officialImageRef))
     }
 
     @Test("OnboardingOrchestrator parses docker load output and DeploymentDetector resolves standalone venv path")

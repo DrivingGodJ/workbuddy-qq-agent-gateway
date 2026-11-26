@@ -29,11 +29,25 @@ public enum OnboardingInstallChoice: String, Sendable {
 }
 
 public enum SnowlumaImageSourceMode: String, CaseIterable, Identifiable, Sendable {
+    case remoteRegistryPull = "从内置镜像源在线下载（推荐）"
     case existingLocalImage = "本机已有镜像"
     case offlineArchiveTar = "导入离线镜像包 (.tar / .tar.gz)"
     case localProjectFolder = "从本地 / NAS 工程目录构建"
 
     public var id: String { rawValue }
+}
+
+public enum SnowlumaMirrorPreset: String, CaseIterable, Identifiable, Sendable {
+    case autoFallback = "自动选择（国内南京大学镜像优先，失败自动切官方源）"
+    case njuMirror = "南京大学 GHCR 镜像（国内免代理直连）"
+    case ghcrOfficial = "GitHub 官方 GHCR 源（zhx57/SnowLuma）"
+    case custom = "自定义镜像地址"
+
+    public var id: String { rawValue }
+
+    public static let njuImageRef = "ghcr.nju.edu.cn/zhx57/snowluma:latest"
+    public static let officialImageRef = "ghcr.io/zhx57/snowluma:latest"
+    public static let builtinImageCandidates: [String] = [njuImageRef, officialImageRef]
 }
 
 @MainActor
@@ -63,7 +77,9 @@ public final class OnboardingOrchestrator {
     public var colimaRunning: Bool = false
     public var containerReady: Bool = false
     public var generatedVNCPassword: String?
-    public var imageSourceMode: SnowlumaImageSourceMode = .existingLocalImage
+    public var imageSourceMode: SnowlumaImageSourceMode = .remoteRegistryPull
+    public var selectedMirrorPreset: SnowlumaMirrorPreset = .autoFallback
+    public var customRemoteImageRef: String = SnowlumaMirrorPreset.njuImageRef
     public var allDockerImages: [String] = []
     public var availableDockerImages: [String] = []
     public var showAllDockerImages: Bool = false
@@ -655,6 +671,72 @@ public final class OnboardingOrchestrator {
         }
     }
 
+    public nonisolated static func resolveRemoteImageCandidates(
+        preset: SnowlumaMirrorPreset,
+        customImageReference: String
+    ) -> [String] {
+        switch preset {
+        case .autoFallback:
+            return SnowlumaMirrorPreset.builtinImageCandidates
+        case .njuMirror:
+            return [SnowlumaMirrorPreset.njuImageRef]
+        case .ghcrOfficial:
+            return [SnowlumaMirrorPreset.officialImageRef]
+        case .custom:
+            let trimmed = customImageReference.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+                return []
+            }
+            return [trimmed]
+        }
+    }
+
+    public func pullSnowlumaImage(
+        dockerExecutable: String,
+        dockerContext: String,
+        candidates: [String]
+    ) async throws -> String {
+        guard !candidates.isEmpty else {
+            throw NSError(domain: "Onboarding", code: 14, userInfo: [
+                NSLocalizedDescriptionKey: "请输入有效的 Docker 镜像地址（不能包含空格，例如 ghcr.nju.edu.cn/zhx57/snowluma:latest）。"
+            ])
+        }
+
+        var lastFailure = "未知错误"
+        for (index, imageRef) in candidates.enumerated() {
+            activeTaskStatus = "2/4 正在拉取 SnowLuma ARM64 镜像（\(index + 1)/\(candidates.count)）：\(imageRef)（首次约需 1–5 分钟）…"
+            appendLog("2/4 正在从镜像源拉取 linux/arm64 镜像：\(imageRef)…")
+            let pullRes = try await runner.run(
+                executable: dockerExecutable,
+                arguments: ["--context", dockerContext, "pull", "--platform", "linux/arm64", imageRef],
+                currentDirectory: nil,
+                extraEnv: ShellRunner.systemProxyEnvironment(),
+                timeoutSeconds: 1800
+            )
+            if !pullRes.stdout.isEmpty {
+                appendLog(pullRes.stdout)
+            }
+            if pullRes.succeeded {
+                appendLog("镜像拉取成功：\(imageRef)")
+                return imageRef
+            }
+
+            let detail = pullRes.stderr.isEmpty ? pullRes.stdout : pullRes.stderr
+            lastFailure = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if lastFailure.isEmpty {
+                lastFailure = "exit code \(pullRes.exitCode)"
+            }
+            appendLog("拉取失败（\(imageRef)）：\(lastFailure)")
+            if index + 1 < candidates.count {
+                appendLog("镜像源 \(imageRef) 拉取失败，自动回退到下一个备用源…")
+            }
+        }
+
+        throw NSError(domain: "Onboarding", code: 15, userInfo: [
+            NSLocalizedDescriptionKey: "所有镜像源拉取均失败（已尝试：\(candidates.joined(separator: ", "))）。最后错误：\(lastFailure)。建议检查网络/代理，或切换为自定义镜像地址、导入离线镜像包。"
+        ])
+    }
+
     public func readKeychainSecretForCopy(_ account: KeychainAccount) -> String? {
         keychain.read(account: account)
     }
@@ -740,9 +822,22 @@ public final class OnboardingOrchestrator {
                 return
             }
 
-            // 2/4 Prepare SnowLuma image from selected offline/local/NAS source
+            // 2/4 Prepare SnowLuma image from selected source
             var resolvedImageTag = imageTag ?? selectedImageTag
             switch imageSourceMode {
+            case .remoteRegistryPull:
+                let candidates = Self.resolveRemoteImageCandidates(
+                    preset: selectedMirrorPreset,
+                    customImageReference: customRemoteImageRef
+                )
+                let pulled = try await pullSnowlumaImage(
+                    dockerExecutable: docker,
+                    dockerContext: dockerContext,
+                    candidates: candidates
+                )
+                resolvedImageTag = pulled
+                selectedImageTag = pulled
+
             case .existingLocalImage:
                 await refreshLocalDockerImages(dockerContext: dockerContext)
                 if !displayedDockerImages.isEmpty && !displayedDockerImages.contains(resolvedImageTag) {
@@ -757,7 +852,7 @@ public final class OnboardingOrchestrator {
                 )
                 guard imgCheck.succeeded else {
                     throw NSError(domain: "Onboarding", code: 10, userInfo: [
-                        NSLocalizedDescriptionKey: "本机未找到镜像 \(resolvedImageTag)，请切换为「导入离线镜像包」或「从本地 / NAS 工程目录构建」。"
+                        NSLocalizedDescriptionKey: "本机未找到镜像 \(resolvedImageTag)，请切换为「从内置镜像源在线下载」、「导入离线镜像包」或「从本地 / NAS 工程目录构建」。"
                     ])
                 }
                 appendLog("2/4 使用本机已有镜像：\(resolvedImageTag)")
@@ -867,6 +962,7 @@ public final class OnboardingOrchestrator {
                     "--context", dockerContext, "run", "-d",
                     "--name", containerName,
                     "--restart", "unless-stopped",
+                    "--shm-size=1g",
                     "--cap-add=SYS_PTRACE",
                     "--security-opt", "seccomp=unconfined",
                     "-e", "VNC_PASSWD=\(vncPass)",
